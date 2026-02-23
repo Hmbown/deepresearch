@@ -7,7 +7,6 @@ def test_no_legacy_graph_patterns_in_source():
         "IntakeFirstApp",
         "@entrypoint",
         "Send(",
-        "deepagents",
         "evaluate_wave",
         "classify_and_plan",
         "WAVE_EVALUATION_PROMPT",

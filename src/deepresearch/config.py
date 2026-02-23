@@ -187,6 +187,15 @@ def validate_search_provider_configuration() -> str:
     return "Search provider ready (`SEARCH_PROVIDER=tavily`)."
 
 
+def get_model_string(role: str = "orchestrator") -> str:
+    """Return the raw provider:model string (e.g. ``"openai:gpt-5.2"``).
+
+    Useful for callers like ``create_deep_agent()`` that accept model strings
+    directly and apply their own provider-specific handling.
+    """
+    return _resolve_model_for_role(role)
+
+
 def get_llm(role: str = "orchestrator"):
     """Return a ChatModel for 'orchestrator' or 'subagent' role.
 

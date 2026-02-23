@@ -7,7 +7,9 @@ def _load_graph_module():
     return importlib.reload(graph)
 
 
-def test_native_subgraph_builders_compile():
+def test_native_subgraph_builders_compile(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     graph = _load_graph_module()
 
     researcher_subgraph = graph.build_researcher_subgraph()
@@ -32,9 +34,10 @@ def test_main_graph_routes_through_supervisor_and_final_report_nodes():
     assert ("final_report_generation", "__end__") in edges
 
 
-def test_deepagents_removed_from_runtime_and_dependencies():
-    graph_source = Path("src/deepresearch/graph.py").read_text(encoding="utf-8")
-    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+def test_researcher_subgraph_uses_deep_agent(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    from deepresearch.researcher_subgraph import build_researcher_subgraph
 
-    assert "deepagents" not in graph_source
-    assert "deepagents" not in pyproject
+    agent = build_researcher_subgraph()
+    assert hasattr(agent, "ainvoke")

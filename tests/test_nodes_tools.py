@@ -90,7 +90,15 @@ def test_fetch_url_extracts_content_with_trafilatura():
     mock_response.text = html
     mock_response.raise_for_status = lambda: None
 
-    with patch("httpx.AsyncClient") as mock_client_cls:
+    import types
+
+    fake_trafilatura = types.ModuleType("trafilatura")
+    fake_trafilatura.extract = lambda html, **kwargs: "Main article content here."
+
+    with (
+        patch("httpx.AsyncClient") as mock_client_cls,
+        patch.dict("sys.modules", {"trafilatura": fake_trafilatura}),
+    ):
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
@@ -101,6 +109,7 @@ def test_fetch_url_extracts_content_with_trafilatura():
 
     assert len(result) > 0
     assert "[Fetch failed" not in result
+    assert "Main article content here." in result
     assert any(e.get("event") == "fetch_url" for e in events)
 
 
@@ -182,7 +191,29 @@ def test_fetch_url_truncates_long_content():
     mock_response.text = html
     mock_response.raise_for_status = lambda: None
 
-    with patch("httpx.AsyncClient") as mock_client_cls:
+    import types
+
+    fake_trafilatura = types.ModuleType("trafilatura")
+    fake_trafilatura.extract = lambda html, **kwargs: None  # force bs4 fallback
+
+    fake_bs4 = types.ModuleType("bs4")
+
+    class FakeSoup:
+        def __init__(self, html, parser):
+            self._text = long_text
+
+        def __call__(self, tags):
+            return []
+
+        def get_text(self, separator="\n", strip=True):
+            return self._text
+
+    fake_bs4.BeautifulSoup = FakeSoup
+
+    with (
+        patch("httpx.AsyncClient") as mock_client_cls,
+        patch.dict("sys.modules", {"trafilatura": fake_trafilatura, "bs4": fake_bs4}),
+    ):
         mock_client = AsyncMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)

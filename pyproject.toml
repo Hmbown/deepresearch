@@ -17,6 +17,7 @@ dependencies = [
     "tavily-python==0.7.21",
     "certifi==2026.1.4",
     "langsmith==0.7.6",
+    "deepagents==0.4.2",
 ]
 
 [project.scripts]

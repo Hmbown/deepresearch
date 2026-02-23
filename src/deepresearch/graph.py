@@ -8,10 +8,7 @@ from .intake import clarify_with_user, route_turn, write_research_brief
 from .report import final_report_generation
 from .researcher_subgraph import (
     build_researcher_subgraph,
-    compress_research,
-    researcher,
-    researcher_tools,
-    route_researcher,
+    extract_research_from_messages,
 )
 from .state import (
     ClarifyWithUser,
@@ -67,11 +64,8 @@ __all__ = [
     "route_turn",
     "clarify_with_user",
     "write_research_brief",
-    "researcher",
-    "researcher_tools",
-    "route_researcher",
-    "compress_research",
     "build_researcher_subgraph",
+    "extract_research_from_messages",
     "supervisor",
     "supervisor_tools",
     "route_supervisor",

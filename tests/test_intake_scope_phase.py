@@ -211,8 +211,9 @@ def test_supervisor_tools_runs_parallel_research_and_enforces_cap(monkeypatch):
     researcher_graph = SimpleNamespace(
         ainvoke=AsyncMock(
             return_value={
-                "compressed_research": "compressed finding [1]",
-                "raw_notes": ["raw finding [1]"],
+                "messages": [
+                    AIMessage(content="compressed finding [1]"),
+                ],
             }
         )
     )
@@ -245,8 +246,9 @@ def test_supervisor_tools_runs_parallel_research_and_enforces_cap(monkeypatch):
     result = asyncio.run(graph.supervisor_tools(state))
 
     assert result["research_iterations"] == 1
-    assert result["notes"] == ["compressed finding [1]"]
-    assert result["raw_notes"] == ["raw finding [1]"]
+    assert result["notes"]
+    assert result["raw_notes"]
+    assert any("finding [1]" in note for note in result["notes"])
     assert any("skipped" in message.content for message in result["supervisor_messages"])
     assert researcher_graph.ainvoke.await_count == 1
 

@@ -14,6 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from .config import (
     get_llm,
     get_max_concurrent_research_units,
+    get_max_react_tool_calls,
     get_max_researcher_iterations,
     get_supervisor_final_report_max_sections,
     get_supervisor_notes_max_bullets,
@@ -21,7 +22,7 @@ from .config import (
 )
 from .nodes import think_tool
 from .prompts import COMPRESSION_PROMPT, FINAL_REPORT_PROMPT, SUPERVISOR_PROMPT
-from .researcher_subgraph import build_researcher_subgraph
+from .researcher_subgraph import build_researcher_subgraph, extract_research_from_messages
 from .runtime_utils import invoke_runnable_with_config, log_runtime_event
 from .state import (
     ConductResearch,
@@ -152,6 +153,8 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
 
     if runnable_research_calls:
         researcher_graph = build_researcher_subgraph()
+        max_calls = get_max_react_tool_calls()
+        researcher_recursion_limit = max_calls * 2 + 1
 
         async def run_research_call(index: int, call: dict[str, Any]) -> tuple[ToolMessage, str | None, list[str]]:
             call_id = str(call.get("id") or f"supervisor_research_{index}")
@@ -168,15 +171,12 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
                     [],
                 )
 
-            payload = {
-                "researcher_messages": [HumanMessage(content=topic)],
-                "tool_call_iterations": 0,
-                "research_topic": topic,
-                "compressed_research": "",
-                "raw_notes": [],
-            }
+            payload = {"messages": [HumanMessage(content=topic)]}
             try:
-                result = await invoke_runnable_with_config(researcher_graph, payload, config)
+                result = await researcher_graph.ainvoke(
+                    payload,
+                    config={"recursion_limit": researcher_recursion_limit},
+                )
             except Exception as exc:  # pragma: no cover - defensive guard
                 failure_message = ToolMessage(
                     content=f"[Research unit failed: {exc}]",
@@ -185,8 +185,9 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
                 )
                 return failure_message, None, []
 
-            compressed = state_text_or_none(result.get("compressed_research")) if isinstance(result, dict) else None
-            raw = normalize_note_list(result.get("raw_notes")) if isinstance(result, dict) else []
+            if not isinstance(result, dict):
+                result = {}
+            compressed, raw = extract_research_from_messages(result)
             content = compressed or join_note_list(raw) or "[Research unit returned no notes]"
             return (
                 ToolMessage(content=content, name=ConductResearch.__name__, tool_call_id=call_id),

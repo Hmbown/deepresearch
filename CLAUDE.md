@@ -33,14 +33,15 @@ deepresearch/
 
 ## Architecture
 
-Runtime is a single deep agent created via `create_deep_agent()`:
+Runtime is a native LangGraph graph (intake → supervisor → report) with the researcher leaf node powered by `create_deep_agent()`:
 
-- Main orchestrator agent uses:
-  - `write_todos` via middleware
-  - `task()` subagent delegation via `SubAgentMiddleware`
-  - summarization + filesystem middleware from deepagents defaults
-- One specialized `research-agent` subagent is provided.
-- Multiple `task()` calls in one model turn execute in parallel.
+- Main graph: `build_app()` in `graph.py` — intake, supervisor subgraph, final report generation.
+- Supervisor subgraph: hand-built LangGraph loop that dispatches `ConductResearch` tool calls.
+- Researcher subgraph: `build_researcher_subgraph()` returns a `create_deep_agent()` compiled graph.
+  - Accepts `{"messages": [HumanMessage(content=topic)]}` and returns `MessagesState`.
+  - Built-in middleware: `SummarizationMiddleware`, `FilesystemMiddleware`, `PatchToolCallsMiddleware`, `TodoListMiddleware`, `AnthropicPromptCachingMiddleware`.
+  - Uses the project's existing research tools (`search_web`, `fetch_url`, `think_tool`).
+  - Post-processed via `extract_research_from_messages()` to produce compressed notes.
 
 ## Output Contract
 
