@@ -9,6 +9,7 @@ import uuid
 
 from langchain_core.messages import HumanMessage
 
+from .config import online_evals_enabled
 from .env import ensure_runtime_env_ready, runtime_preflight
 from .message_utils import extract_text_content as _extract_text_content
 
@@ -36,7 +37,12 @@ def _new_thread_id() -> str:
 
 
 def _thread_config(thread_id: str) -> dict[str, Any]:
-    return {"configurable": {"thread_id": thread_id}}
+    cfg: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+    if online_evals_enabled():
+        from .evals import build_eval_callback
+
+        cfg["callbacks"] = [build_eval_callback()]
+    return cfg
 
 
 async def run(

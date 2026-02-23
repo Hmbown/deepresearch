@@ -24,6 +24,8 @@ DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS = 10
 DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET = 250
 DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS = 8
 DEFAULT_ENABLE_RUNTIME_EVENT_LOGS = False
+DEFAULT_EVAL_MODEL = "openai:gpt-4.1-mini"
+DEFAULT_ENABLE_ONLINE_EVALS = False
 
 
 class SearchProviderConfigError(RuntimeError):
@@ -127,6 +129,16 @@ def get_search_provider() -> Literal["exa", "tavily", "none"]:
 def runtime_event_logs_enabled() -> bool:
     """Return whether low-noise runtime event logs are enabled."""
     return _resolve_bool_env("ENABLE_RUNTIME_EVENT_LOGS", DEFAULT_ENABLE_RUNTIME_EVENT_LOGS)
+
+
+def online_evals_enabled() -> bool:
+    """Return whether online LLM-as-judge evaluations are enabled."""
+    return _resolve_bool_env("ENABLE_ONLINE_EVALS", DEFAULT_ENABLE_ONLINE_EVALS)
+
+
+def get_eval_model() -> str:
+    """Return the model string for eval judge (e.g. ``"openai:gpt-4.1-mini"``)."""
+    return os.environ.get("EVAL_MODEL", DEFAULT_EVAL_MODEL)
 
 
 def _resolve_required_exa_key() -> str:
