@@ -18,6 +18,8 @@ dependencies = [
     "certifi==2026.1.4",
     "langsmith==0.7.6",
     "deepagents==0.4.2",
+    "trafilatura==2.0.0",
+    "beautifulsoup4==4.14.3",
 ]
 
 [project.scripts]
