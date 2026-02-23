@@ -1,0 +1,394 @@
+"""Shared state models and runtime helpers for the native LangGraph path."""
+
+from __future__ import annotations
+
+import json
+import operator
+import re
+from datetime import datetime, timezone
+from typing import Annotated, Any, Literal, Sequence, TypedDict
+
+from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.graph import MessagesState
+from langgraph.graph.message import add_messages
+from pydantic import BaseModel, Field
+
+from .config import get_supervisor_notes_max_bullets, get_supervisor_notes_word_budget
+from .message_utils import extract_text_content
+
+FALLBACK_CLARIFY_QUESTION = (
+    "Could you clarify the exact scope, constraints, and desired output format for this research?"
+)
+FALLBACK_VERIFICATION = (
+    "I have enough context to begin deep research now. I will break this into focused research "
+    "tracks, verify with strong sources, and return a synthesized report with citations."
+)
+FALLBACK_FINAL_REPORT = (
+    "I completed research execution but did not receive a final synthesis payload. "
+    "Please ask a focused follow-up and I will refine from the collected notes."
+)
+FALLBACK_FOLLOWUP_CLARIFICATION = (
+    "I want to ensure we are aligned: is your latest question still about the same research topic?"
+)
+FOLLOW_UP_CONTINUATION_MARKERS = {
+    "also",
+    "additionally",
+    "add",
+    "further",
+    "more",
+    "detail",
+    "details",
+    "specific",
+    "specifically",
+    "focus",
+    "refine",
+    "refinement",
+    "deeper",
+    "dive",
+    "expand",
+}
+FOLLOW_UP_SHIFT_MARKERS = {
+    "instead",
+    "change",
+    "switch",
+    "different",
+    "new",
+    "another",
+    "unrelated",
+    "otherwise",
+    "topic",
+    "let",
+    "lets",
+    "let's",
+}
+STOP_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "into",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "the",
+    "this",
+    "that",
+    "to",
+    "with",
+    "within",
+    "about",
+    "can",
+    "how",
+    "i",
+    "i'm",
+    "im",
+    "you",
+    "we",
+    "they",
+    "them",
+    "me",
+    "us",
+}
+
+
+class ClarifyWithUser(BaseModel):
+    """Structured decision for whether a clarification turn is needed."""
+
+    need_clarification: bool = Field(
+        description="Whether the user should be asked one clarification question before research.",
+    )
+    question: str = Field(
+        description="Single conversational clarification question when clarification is required.",
+    )
+    verification: str = Field(
+        description="Acknowledgement message that research is starting when clarification is not required.",
+    )
+
+
+class ResearchBrief(BaseModel):
+    """Structured research brief used to seed the supervisor."""
+
+    research_brief: str = Field(
+        description="Focused, concrete research brief synthesized from the full chat history.",
+    )
+
+
+class ConductResearch(BaseModel):
+    """Tool payload for delegating one focused research unit."""
+
+    research_topic: str = Field(
+        description=(
+            "The focused topic for one research unit with enough context to execute independently."
+        ),
+    )
+
+
+class ResearchComplete(BaseModel):
+    """Tool payload signaling that supervisor synthesis is complete."""
+
+    pass
+
+
+class ResearcherState(TypedDict, total=False):
+    """State schema for one focused researcher loop."""
+
+    researcher_messages: Annotated[Sequence[BaseMessage], add_messages]
+    tool_call_iterations: int
+    research_topic: str
+    compressed_research: str
+    raw_notes: Annotated[list[str], operator.add]
+
+
+class ResearcherOutputState(TypedDict, total=False):
+    """Filtered researcher output passed back to the supervisor."""
+
+    compressed_research: str
+    raw_notes: Annotated[list[str], operator.add]
+
+
+class SupervisorState(TypedDict, total=False):
+    """Supervisor state that coordinates multiple researcher delegations."""
+
+    supervisor_messages: Annotated[Sequence[BaseMessage], add_messages]
+    research_brief: str
+    notes: Annotated[list[str], operator.add]
+    research_iterations: int
+    raw_notes: Annotated[list[str], operator.add]
+
+
+class ResearchState(MessagesState):
+    """Main graph state for intake + supervisor + final synthesis."""
+
+    research_brief: str | None = None
+    intake_decision: Literal["clarify", "proceed"] | None = None
+    awaiting_clarification: bool = False
+    supervisor_messages: Annotated[Sequence[BaseMessage], add_messages]
+    notes: Annotated[list[str], operator.add]
+    raw_notes: Annotated[list[str], operator.add]
+    final_report: str = ""
+
+
+def today_utc_date() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def latest_human_text(messages: list[Any]) -> str:
+    for message in reversed(messages):
+        if getattr(message, "type", "") == "human":
+            return extract_text_content(getattr(message, "content", "")).strip()
+    return ""
+
+
+def human_texts(messages: list[Any]) -> list[str]:
+    """Return all human messages in chronological order."""
+    return [
+        extract_text_content(getattr(message, "content", "")).strip()
+        for message in messages
+        if getattr(message, "type", "") == "human"
+    ]
+
+
+def normalize_topic_token(token: str) -> str:
+    """Normalize a token for lightweight intent comparison."""
+    cleaned = re.sub(r"[^a-z0-9']+", "", token.lower())
+    if len(cleaned) <= 2 or cleaned in STOP_TOKENS:
+        return ""
+    if cleaned.endswith("ies"):
+        cleaned = cleaned[:-3] + "y"
+    elif cleaned.endswith("ing") and len(cleaned) > 5:
+        cleaned = cleaned[:-3]
+    elif cleaned.endswith("ed") and len(cleaned) > 4:
+        cleaned = cleaned[:-2]
+    elif cleaned.endswith("es") and len(cleaned) > 4:
+        cleaned = cleaned[:-2]
+    elif cleaned.endswith("s") and len(cleaned) > 3:
+        cleaned = cleaned[:-1]
+    return cleaned
+
+
+def tokenize_for_intent(text: str) -> set[str]:
+    """Tokenize normalized user text for lightweight intent comparison."""
+    return {
+        token
+        for token in (normalize_topic_token(raw) for raw in re.findall(r"[A-Za-z0-9']+", text))
+        if token
+    }
+
+
+def should_recheck_intent_on_follow_up(messages: list[Any]) -> bool:
+    """Decide whether a follow-up turn likely shifts intent."""
+    messages_text = [text for text in human_texts(messages) if text]
+    if len(messages_text) < 2:
+        return False
+
+    latest = messages_text[-1]
+    previous = messages_text[-2]
+    latest_tokens = tokenize_for_intent(latest)
+    previous_tokens = tokenize_for_intent(previous)
+    if not latest_tokens or not previous_tokens:
+        return False
+
+    if latest_tokens & FOLLOW_UP_SHIFT_MARKERS:
+        return True
+    if latest_tokens & previous_tokens:
+        return False
+    if any(marker in latest_tokens for marker in FOLLOW_UP_CONTINUATION_MARKERS):
+        return False
+
+    return True
+
+
+def state_text_or_none(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def normalize_note_list(value: Any) -> list[str]:
+    """Normalize a state value into a clean list of note strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, list):
+        normalized: list[str] = []
+        for item in value:
+            text = state_text_or_none(item)
+            if text:
+                normalized.append(text)
+        return normalized
+    text = state_text_or_none(value)
+    return [text] if text else []
+
+
+def join_note_list(values: Any) -> str | None:
+    """Join normalized notes into one synthesis-ready text block."""
+    notes = normalize_note_list(values)
+    if not notes:
+        return None
+    return "\n\n".join(notes).strip()
+
+
+def is_token_limit_error(exc: Exception) -> bool:
+    """Best-effort check for context/token limit failures across providers."""
+    message = str(exc).lower()
+    token_markers = (
+        "context length",
+        "maximum context",
+        "too many tokens",
+        "token limit",
+        "max tokens",
+    )
+    return any(marker in message for marker in token_markers)
+
+
+def extract_tool_calls(message: Any) -> list[dict[str, Any]]:
+    """Normalize tool call payloads from AI messages across provider shapes."""
+    tool_calls = getattr(message, "tool_calls", None)
+    if isinstance(tool_calls, list) and tool_calls:
+        normalized: list[dict[str, Any]] = []
+        for idx, call in enumerate(tool_calls):
+            if not isinstance(call, dict):
+                continue
+            call_id = str(call.get("id") or f"tool_call_{idx}")
+            normalized.append(
+                {
+                    "id": call_id,
+                    "name": str(call.get("name") or ""),
+                    "args": call.get("args") if isinstance(call.get("args"), dict) else {},
+                }
+            )
+        if normalized:
+            return normalized
+
+    additional_kwargs = getattr(message, "additional_kwargs", {})
+    if not isinstance(additional_kwargs, dict):
+        return []
+
+    raw_tool_calls = additional_kwargs.get("tool_calls")
+    if not isinstance(raw_tool_calls, list):
+        return []
+
+    normalized = []
+    for idx, call in enumerate(raw_tool_calls):
+        if not isinstance(call, dict):
+            continue
+        function_payload = call.get("function") if isinstance(call.get("function"), dict) else {}
+        name = str(call.get("name") or function_payload.get("name") or "")
+        args_payload = call.get("args", function_payload.get("arguments", {}))
+        args: dict[str, Any]
+        if isinstance(args_payload, dict):
+            args = args_payload
+        elif isinstance(args_payload, str):
+            try:
+                parsed = json.loads(args_payload)
+                args = parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                args = {}
+        else:
+            args = {}
+        normalized.append({"id": str(call.get("id") or f"tool_call_{idx}"), "name": name, "args": args})
+    return normalized
+
+
+def latest_ai_message(messages: list[Any]) -> AIMessage | None:
+    for message in reversed(messages):
+        if getattr(message, "type", "") == "ai":
+            return message
+    return None
+
+
+def stringify_tool_output(output: Any) -> str:
+    if isinstance(output, str):
+        return output.strip()
+    if isinstance(output, list):
+        return "\n".join(extract_text_content(item).strip() for item in output if extract_text_content(item).strip())
+    if isinstance(output, dict):
+        if "content" in output:
+            return extract_text_content(output.get("content", "")).strip()
+        try:
+            return json.dumps(output, ensure_ascii=True)
+        except TypeError:
+            return str(output)
+    return extract_text_content(getattr(output, "content", output)).strip()
+
+
+def compress_note_text(raw_text: str | None) -> str | None:
+    text = state_text_or_none(raw_text)
+    if not text:
+        return None
+
+    max_bullets = get_supervisor_notes_max_bullets()
+    word_budget = get_supervisor_notes_word_budget()
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for block in re.split(r"\n\n+", text):
+        normalized = re.sub(r"\s+", " ", block).strip()
+        if not normalized:
+            continue
+        dedupe_key = normalized.lower()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        candidates.append(normalized)
+        if len(candidates) >= max_bullets:
+            break
+
+    if not candidates:
+        return None
+
+    compressed = "\n".join(f"- {item}" for item in candidates)
+    words = compressed.split()
+    if len(words) > word_budget:
+        compressed = " ".join(words[:word_budget]).strip() + " ..."
+    return compressed.strip()
