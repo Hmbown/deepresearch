@@ -57,6 +57,7 @@ def test_runtime_preflight_reports_required_runtime_key_failure(monkeypatch, tmp
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("LANGCHAIN_API_KEY", raising=False)
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
 
     ok, checks = env.runtime_preflight(project_name="deepresearch")
 
@@ -65,6 +66,38 @@ def test_runtime_preflight_reports_required_runtime_key_failure(monkeypatch, tmp
     assert by_name["dotenv_file"].ok is True
     assert by_name["runtime_keys"].ok is False
     assert "OPENAI_API_KEY" in by_name["runtime_keys"].message
+
+
+def test_ensure_runtime_env_ready_raises_for_missing_exa_key_when_exa_selected(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+    monkeypatch.setenv("SEARCH_PROVIDER", "exa")
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="EXA_API_KEY"):
+        env.ensure_runtime_env_ready()
+
+
+def test_runtime_preflight_reports_invalid_search_provider(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+    monkeypatch.setenv("SEARCH_PROVIDER", "invalid-provider")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
+
+    ok, checks = env.runtime_preflight(project_name="deepresearch")
+
+    assert ok is False
+    by_name = {check.name: check for check in checks}
+    assert by_name["search_provider"].ok is False
+    assert "Invalid SEARCH_PROVIDER" in by_name["search_provider"].message
 
 
 def test_verify_langsmith_auth_accepts_langsmith_api_key_alias(monkeypatch, tmp_path):

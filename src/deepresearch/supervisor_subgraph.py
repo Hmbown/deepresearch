@@ -22,7 +22,7 @@ from .config import (
 from .nodes import think_tool
 from .prompts import COMPRESSION_PROMPT, FINAL_REPORT_PROMPT, SUPERVISOR_PROMPT
 from .researcher_subgraph import build_researcher_subgraph
-from .runtime_utils import invoke_runnable_with_config
+from .runtime_utils import invoke_runnable_with_config, log_runtime_event
 from .state import (
     ConductResearch,
     FALLBACK_CLARIFY_QUESTION,
@@ -114,6 +114,16 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
     think_calls = [call for call in tool_calls if call.get("name") == think_tool.name]
     research_calls = [call for call in tool_calls if call.get("name") == ConductResearch.__name__]
     complete_calls = [call for call in tool_calls if call.get("name") == ResearchComplete.__name__]
+    research_iterations = int(state.get("research_iterations", 0) or 0)
+    log_runtime_event(
+        _logger,
+        "supervisor_iteration",
+        research_iterations=research_iterations,
+        total_tool_calls=len(tool_calls),
+        think_calls=len(think_calls),
+        research_calls=len(research_calls),
+        complete_calls=len(complete_calls),
+    )
 
     tool_messages: list[ToolMessage] = []
     notes_additions: list[str] = []
@@ -135,7 +145,6 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
         )
         tool_messages.extend(think_results)
 
-    research_iterations = int(state.get("research_iterations", 0) or 0)
     remaining_iterations = max(0, get_max_researcher_iterations() - research_iterations)
     allowed_parallel = min(get_max_concurrent_research_units(), remaining_iterations)
     runnable_research_calls = research_calls[:allowed_parallel]
@@ -193,6 +202,13 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
             if compressed:
                 notes_additions.append(compressed)
             raw_notes_additions.extend(raw)
+        log_runtime_event(
+            _logger,
+            "supervisor_research_dispatch",
+            executed_calls=len(runnable_research_calls),
+            skipped_calls=len(skipped_research_calls),
+            remaining_iterations=remaining_iterations,
+        )
 
     for index, call in enumerate(skipped_research_calls):
         tool_messages.append(
@@ -215,6 +231,8 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
                 tool_call_id=str(call.get("id") or f"supervisor_complete_{index}"),
             )
         )
+    if completed:
+        log_runtime_event(_logger, "supervisor_completion", research_iterations=research_iterations)
 
     return {
         "supervisor_messages": tool_messages,

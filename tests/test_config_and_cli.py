@@ -4,6 +4,8 @@ import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from deepresearch import cli, config
 
 
@@ -81,62 +83,33 @@ def test_runtime_env_overrides_are_respected(monkeypatch):
     assert config.get_supervisor_final_report_max_sections() == 5
 
 
-def test_get_search_tool_prefers_exa_over_tavily(monkeypatch):
-    class FakeTavilySearch:
-        def __init__(self, **kwargs):
-            self.provider = "tavily"
-            self.kwargs = kwargs
-
-    class FakeExaSearchResults:
-        def __init__(self, **kwargs):
-            self.provider = "exa"
-            self.kwargs = kwargs
-
-    fake_langchain_tavily = types.SimpleNamespace(TavilySearch=FakeTavilySearch)
-    fake_langchain_exa = types.SimpleNamespace(ExaSearchResults=FakeExaSearchResults)
-
-    monkeypatch.setenv("TAVILY_API_KEY", "tav-key")
-    monkeypatch.setenv("EXA_API_KEY", "exa-key")
-    monkeypatch.setitem(sys.modules, "langchain_tavily", fake_langchain_tavily)
-    monkeypatch.setitem(sys.modules, "langchain_exa", fake_langchain_exa)
-
-    tool = config.get_search_tool()
-    assert tool.provider == "exa"
-    assert tool.kwargs["exa_api_key"] == "exa-key"
-    assert "max_results" not in tool.kwargs
+def test_get_search_provider_defaults_to_exa(monkeypatch):
+    monkeypatch.delenv("SEARCH_PROVIDER", raising=False)
+    assert config.get_search_provider() == "exa"
 
 
-def test_get_search_tool_returns_none_when_exa_unavailable(monkeypatch):
-    class FakeTavilySearch:
-        def __init__(self, **kwargs):
-            self.provider = "tavily"
-            self.kwargs = kwargs
-
-    fake_langchain_exa = None
-    monkeypatch.setenv("EXA_API_KEY", "exa-key")
-    monkeypatch.setenv("TAVILY_API_KEY", "tav-key")
-    monkeypatch.setitem(sys.modules, "langchain_exa", fake_langchain_exa)
-
-    tool = config.get_search_tool()
-    assert tool is None
+def test_get_search_provider_rejects_invalid_value(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "duckduckgo")
+    with pytest.raises(config.SearchProviderConfigError, match="Invalid SEARCH_PROVIDER"):
+        config.get_search_provider()
 
 
-def test_get_search_tool_returns_none_with_no_api_keys_or_tools(monkeypatch):
+def test_validate_search_provider_configuration_fails_for_missing_exa_key(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "exa")
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-
-    assert config.get_search_tool() is None
-
-
-def test_get_search_tool_uses_none_when_exa_unset(monkeypatch):
-    monkeypatch.delenv("EXA_API_KEY", raising=False)
-    monkeypatch.setenv("TAVILY_API_KEY", "tav-key")
-
-    tool = config.get_search_tool()
-    assert tool is None
+    with pytest.raises(config.SearchProviderConfigError, match="EXA_API_KEY"):
+        config.validate_search_provider_configuration()
 
 
-def test_get_search_tool_uses_exa_when_tavily_unset(monkeypatch):
+def test_validate_search_provider_configuration_fails_for_missing_exa_dependency(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "exa")
+    monkeypatch.setenv("EXA_API_KEY", "exa-key")
+    monkeypatch.setitem(sys.modules, "langchain_exa", None)
+    with pytest.raises(config.SearchProviderConfigError, match="langchain-exa"):
+        config.validate_search_provider_configuration()
+
+
+def test_get_search_tool_uses_exa_when_provider_is_configured(monkeypatch):
     class FakeExaSearchResults:
         def __init__(self, **kwargs):
             self.provider = "exa"
@@ -144,14 +117,27 @@ def test_get_search_tool_uses_exa_when_tavily_unset(monkeypatch):
 
     fake_langchain_exa = types.SimpleNamespace(ExaSearchResults=FakeExaSearchResults)
 
-    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("SEARCH_PROVIDER", "exa")
     monkeypatch.setenv("EXA_API_KEY", "exa-key")
     monkeypatch.setitem(sys.modules, "langchain_exa", fake_langchain_exa)
 
     tool = config.get_search_tool()
     assert tool.provider == "exa"
     assert tool.kwargs["exa_api_key"] == "exa-key"
-    assert "max_results" not in tool.kwargs
+
+
+def test_get_search_tool_returns_none_when_provider_is_none(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    tool = config.get_search_tool()
+    assert tool is None
+
+
+def test_runtime_event_logs_enabled_reads_env_truthiness(monkeypatch):
+    monkeypatch.delenv("ENABLE_RUNTIME_EVENT_LOGS", raising=False)
+    assert config.runtime_event_logs_enabled() is False
+    monkeypatch.setenv("ENABLE_RUNTIME_EVENT_LOGS", "true")
+    assert config.runtime_event_logs_enabled() is True
 
 
 def test_search_budget_knobs_parse_and_default(monkeypatch):
@@ -209,6 +195,7 @@ def test_cli_run_invokes_app_with_human_message(monkeypatch):
     fake_app = SimpleNamespace(ainvoke=AsyncMock(return_value={"messages": []}))
     monkeypatch.setattr(cli, "_get_app", lambda: fake_app)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
 
     asyncio.run(cli.run("test query", thread_id="thread-test"))
     assert fake_app.ainvoke.await_count == 1
@@ -224,6 +211,7 @@ def test_cli_run_appends_prior_messages_when_provided(monkeypatch):
     fake_app = SimpleNamespace(ainvoke=AsyncMock(return_value={"messages": []}))
     monkeypatch.setattr(cli, "_get_app", lambda: fake_app)
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
 
     prior = [SimpleNamespace(type="human", content="existing context")]
     asyncio.run(cli.run("next query", thread_id="thread-test", prior_messages=prior))
@@ -239,6 +227,7 @@ def test_cli_run_generates_thread_id_when_missing(monkeypatch):
     monkeypatch.setattr(cli, "_get_app", lambda: fake_app)
     monkeypatch.setattr(cli.uuid, "uuid4", lambda: SimpleNamespace(hex="generated-thread"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
 
     asyncio.run(cli.run("query without thread"))
     assert fake_app.ainvoke.await_count == 1

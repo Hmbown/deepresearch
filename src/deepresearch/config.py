@@ -5,12 +5,15 @@ Provider configuration — LLMs and search tools.
 from __future__ import annotations
 
 import os
+from typing import Literal, cast
 
 from langchain.chat_models import init_chat_model
 
 
 DEFAULT_ORCHESTRATOR_MODEL = "openai:gpt-5.2"
 DEFAULT_SUBAGENT_MODEL = "openai:gpt-5.2"
+DEFAULT_SEARCH_PROVIDER = "exa"
+SUPPORTED_SEARCH_PROVIDERS = ("exa", "none")
 DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES = 3
 DEFAULT_RESEARCHER_SIMPLE_SEARCH_BUDGET = 3
 DEFAULT_RESEARCHER_COMPLEX_SEARCH_BUDGET = 5
@@ -20,6 +23,11 @@ DEFAULT_MAX_RESEARCHER_ITERATIONS = 6
 DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS = 10
 DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET = 250
 DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS = 8
+DEFAULT_ENABLE_RUNTIME_EVENT_LOGS = False
+
+
+class SearchProviderConfigError(RuntimeError):
+    """Raised when search provider configuration is invalid or unavailable."""
 
 
 def _resolve_int_env(var_name: str, default: int, minimum: int = 1) -> int:
@@ -36,6 +44,13 @@ def _resolve_int_env(var_name: str, default: int, minimum: int = 1) -> int:
     if value < minimum:
         return default
     return value
+
+
+def _resolve_bool_env(var_name: str, default: bool = False) -> bool:
+    raw_value = os.environ.get(var_name)
+    if raw_value is None:
+        return default
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_max_structured_output_retries() -> int:
@@ -98,6 +113,54 @@ def _resolve_model_for_role(role: str) -> str:
     return os.environ.get("SUBAGENT_MODEL", DEFAULT_SUBAGENT_MODEL)
 
 
+def get_search_provider() -> Literal["exa", "none"]:
+    provider = str(os.environ.get("SEARCH_PROVIDER", DEFAULT_SEARCH_PROVIDER)).strip().lower()
+    if provider in SUPPORTED_SEARCH_PROVIDERS:
+        return cast(Literal["exa", "none"], provider)
+    supported = ", ".join(SUPPORTED_SEARCH_PROVIDERS)
+    raise SearchProviderConfigError(
+        f"Invalid SEARCH_PROVIDER={provider!r}. Supported values: {supported}. "
+        "Set SEARCH_PROVIDER=exa (default) or SEARCH_PROVIDER=none."
+    )
+
+
+def runtime_event_logs_enabled() -> bool:
+    """Return whether low-noise runtime event logs are enabled."""
+    return _resolve_bool_env("ENABLE_RUNTIME_EVENT_LOGS", DEFAULT_ENABLE_RUNTIME_EVENT_LOGS)
+
+
+def _resolve_required_exa_key() -> str:
+    exa_key = str(os.environ.get("EXA_API_KEY", "")).strip()
+    if exa_key:
+        return exa_key
+    raise SearchProviderConfigError(
+        "SEARCH_PROVIDER is set to 'exa' but EXA_API_KEY is missing. "
+        "Set EXA_API_KEY in .env, or set SEARCH_PROVIDER=none to disable web search explicitly."
+    )
+
+
+def _load_exa_search_results_class():
+    try:
+        from langchain_exa import ExaSearchResults
+    except ImportError as exc:
+        raise SearchProviderConfigError(
+            "SEARCH_PROVIDER is set to 'exa' but dependency 'langchain-exa' is unavailable. "
+            "Install project dependencies (`pip install -e .`) or set SEARCH_PROVIDER=none."
+        ) from exc
+    return ExaSearchResults
+
+
+def validate_search_provider_configuration() -> str:
+    """Validate configured search provider and return readiness guidance."""
+    provider = get_search_provider()
+    if provider == "none":
+        return "Search provider disabled (`SEARCH_PROVIDER=none`)."
+
+    _resolve_required_exa_key()
+    _load_exa_search_results_class()
+    return "Search provider ready (`SEARCH_PROVIDER=exa`)."
+
+
 def get_llm(role: str = "orchestrator"):
     """Return a ChatModel for 'orchestrator' or 'subagent' role.
 
@@ -110,18 +173,13 @@ def get_llm(role: str = "orchestrator"):
 
 def get_search_tool():
     """
-    Return a web search tool based on available API keys.
-    Priority: Exa > None.
+    Return a configured web search tool.
     """
-    exa_key = os.environ.get("EXA_API_KEY")
+    provider = get_search_provider()
+    if provider == "none":
+        return None
 
-    if exa_key:
-        try:
-            from langchain_exa import ExaSearchResults
-
-            # ExaSearchResults is configured primarily at invocation time.
-            return ExaSearchResults(exa_api_key=exa_key)
-        except ImportError:
-            pass
-
-    return None
+    exa_key = _resolve_required_exa_key()
+    exa_search_cls = _load_exa_search_results_class()
+    # ExaSearchResults is configured primarily at invocation time.
+    return exa_search_cls(exa_api_key=exa_key)

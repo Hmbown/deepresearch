@@ -291,8 +291,9 @@ def test_final_report_generation_uses_model_output(monkeypatch):
         )
     )
 
-    assert result["final_report"] == "Final report with citations [1]."
-    assert result["messages"][-1].content == "Final report with citations [1]."
+    assert "Final report with citations [1]." in result["final_report"]
+    assert "Sources:" in result["final_report"]
+    assert result["messages"][-1].content == result["final_report"]
 
 
 def test_final_report_generation_retries_on_token_limit_then_succeeds(monkeypatch):
@@ -317,7 +318,8 @@ def test_final_report_generation_retries_on_token_limit_then_succeeds(monkeypatc
         )
     )
 
-    assert result["final_report"] == "Recovered report"
+    assert "Recovered report" in result["final_report"]
+    assert "Sources:" in result["final_report"]
     assert len(llm.freeform_calls) == 2
 
 
@@ -361,5 +363,6 @@ def test_app_proceed_flow_runs_supervisor_and_final_report(monkeypatch):
 
     assert result["intake_decision"] == "proceed"
     assert result["awaiting_clarification"] is False
-    assert result["final_report"] == "Final synthesized answer [1]."
+    assert "Final synthesized answer [1]." in result["final_report"]
+    assert "Sources:" in result["final_report"]
     assert supervisor_graph.ainvoke.await_count == 1

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables.config import RunnableConfig
+
+from .config import runtime_event_logs_enabled
 
 _logger = logging.getLogger(__name__)
 
@@ -23,6 +26,21 @@ def runnable_supports_config(callable_obj: Any) -> bool:
     if has_var_kwargs:
         return True
     return any(param.name == "config" for param in parameters)
+
+
+def log_runtime_event(logger: logging.Logger, event: str, **fields: Any) -> None:
+    """Emit opt-in, structured runtime event logs."""
+    if not runtime_event_logs_enabled():
+        return
+
+    encoded_fields = " ".join(
+        f"{name}={json.dumps(value, ensure_ascii=True, sort_keys=True)}"
+        for name, value in sorted(fields.items())
+    )
+    if encoded_fields:
+        logger.info("event=%s %s", event, encoded_fields)
+        return
+    logger.info("event=%s", event)
 
 
 async def invoke_runnable_with_config(runnable: Any, payload: Any, config: RunnableConfig | None) -> Any:

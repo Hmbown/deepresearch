@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -19,7 +20,7 @@ from .config import (
 )
 from .nodes import _build_fetch_url_tool, _build_search_tool_with_processing, think_tool
 from .prompts import RESEARCHER_PROMPT
-from .runtime_utils import invoke_runnable_with_config
+from .runtime_utils import invoke_runnable_with_config, log_runtime_event
 from .state import (
     ResearcherOutputState,
     ResearcherState,
@@ -29,6 +30,8 @@ from .state import (
     state_text_or_none,
     stringify_tool_output,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def build_research_tools(writer: Any | None = None) -> list[Any]:
@@ -60,6 +63,12 @@ async def researcher(state: ResearcherState, config: RunnableConfig = None) -> d
         topic = state_text_or_none(state.get("research_topic"))
         if topic:
             messages = [HumanMessage(content=topic)]
+    log_runtime_event(
+        _logger,
+        "researcher_iteration",
+        message_count=len(messages),
+        tool_call_iterations=int(state.get("tool_call_iterations", 0) or 0),
+    )
     payload = [SystemMessage(content=render_researcher_prompt()), *messages]
     response = await invoke_runnable_with_config(model, payload, config)
     if getattr(response, "type", "") != "ai":
@@ -93,6 +102,13 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig = None
         return {}
 
     selected_calls = tool_calls[:remaining]
+    log_runtime_event(
+        _logger,
+        "researcher_tool_batch",
+        requested_calls=len(tool_calls),
+        executed_calls=len(selected_calls),
+        remaining_budget=remaining,
+    )
     available_tools = {tool.name: tool for tool in build_research_tools()}
 
     async def execute_tool_call(index: int, call: dict[str, Any]) -> ToolMessage:
@@ -102,6 +118,7 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig = None
 
         tool_obj = available_tools.get(tool_name)
         if tool_obj is None:
+            log_runtime_event(_logger, "researcher_tool_call", tool=tool_name, status="unavailable")
             return ToolMessage(
                 content=f"[Tool unavailable: {tool_name}]",
                 name=tool_name,
@@ -111,7 +128,10 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig = None
         try:
             output = await invoke_single_tool(tool_obj, args)
         except Exception as exc:  # pragma: no cover - defensive guard
+            log_runtime_event(_logger, "researcher_tool_call", tool=tool_name, status="failed", error=str(exc))
             output = f"[Tool {tool_name} failed: {exc}]"
+        else:
+            log_runtime_event(_logger, "researcher_tool_call", tool=tool_name, status="ok")
 
         return ToolMessage(content=output or "[Tool returned empty output]", name=tool_name, tool_call_id=tool_call_id)
 

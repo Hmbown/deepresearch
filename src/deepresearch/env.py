@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .config import SearchProviderConfigError, validate_search_provider_configuration
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _PROJECT_DOTENV = _PROJECT_ROOT / ".env"
 _ENV_BOOTSTRAPPED = False
@@ -74,6 +76,10 @@ def ensure_runtime_env_ready() -> None:
     bootstrap_env(override=False)
     missing = missing_runtime_env_vars()
     if not missing:
+        try:
+            validate_search_provider_configuration()
+        except SearchProviderConfigError as exc:
+            raise RuntimeError(str(exc)) from exc
         return
     joined = ", ".join(missing)
     raise RuntimeError(
@@ -143,16 +149,11 @@ def runtime_preflight(project_name: str | None = None) -> tuple[bool, list[Prefl
     else:
         checks.append(PreflightCheckResult("runtime_keys", True, "Required runtime key(s) are set."))
 
-    if os.environ.get("EXA_API_KEY"):
-        checks.append(PreflightCheckResult("search_key", True, "EXA search key detected."))
-    else:
-        checks.append(
-            PreflightCheckResult(
-                "search_key",
-                True,
-                "EXA key not set (`EXA_API_KEY`); runtime still works but web research quality will be reduced.",
-            )
-        )
+    try:
+        search_provider_message = validate_search_provider_configuration()
+        checks.append(PreflightCheckResult("search_provider", True, search_provider_message))
+    except SearchProviderConfigError as exc:
+        checks.append(PreflightCheckResult("search_provider", False, str(exc)))
 
     langsmith_ok, langsmith_message = verify_langsmith_auth(project_name=project_name)
     checks.append(PreflightCheckResult("langsmith", langsmith_ok, langsmith_message))

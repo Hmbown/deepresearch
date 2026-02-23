@@ -13,9 +13,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 [ -f .env ] || cp .env.example .env
+# Set EXA_API_KEY in .env (default SEARCH_PROVIDER=exa), or set SEARCH_PROVIDER=none explicitly.
 python -m deepresearch.cli --preflight
 python -m deepresearch.cli "Compare retrieval strategies for production RAG systems"
 ```
+
+Dependencies are pinned in `pyproject.toml` for reproducible installs.
 
 ## Multi-turn Usage
 
@@ -48,11 +51,13 @@ asyncio.run(main())
 | Variable | Required | Default |
 |---|---|---|
 | `OPENAI_API_KEY` | Yes | — |
-| `EXA_API_KEY` | No | — |
+| `SEARCH_PROVIDER` | No | `exa` |
+| `EXA_API_KEY` | Yes when `SEARCH_PROVIDER=exa` | — |
 | `ORCHESTRATOR_MODEL` | No | `openai:gpt-5.2` |
 | `SUBAGENT_MODEL` | No | `openai:gpt-5.2` |
 | `MAX_CONCURRENT_RESEARCH_UNITS` | No | `4` |
 | `MAX_RESEARCHER_ITERATIONS` | No | `6` |
+| `ENABLE_RUNTIME_EVENT_LOGS` | No | `false` |
 | `LANGCHAIN_TRACING_V2` | No | `false` |
 | `LANGCHAIN_API_KEY` | No | — |
 | `LANGCHAIN_PROJECT` | No | `deepresearch-local` |
