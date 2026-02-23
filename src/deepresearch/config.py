@@ -13,7 +13,7 @@ from langchain.chat_models import init_chat_model
 DEFAULT_ORCHESTRATOR_MODEL = "openai:gpt-5.2"
 DEFAULT_SUBAGENT_MODEL = "openai:gpt-5.2"
 DEFAULT_SEARCH_PROVIDER = "exa"
-SUPPORTED_SEARCH_PROVIDERS = ("exa", "none")
+SUPPORTED_SEARCH_PROVIDERS = ("exa", "tavily", "none")
 DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES = 3
 DEFAULT_RESEARCHER_SIMPLE_SEARCH_BUDGET = 3
 DEFAULT_RESEARCHER_COMPLEX_SEARCH_BUDGET = 5
@@ -113,14 +113,14 @@ def _resolve_model_for_role(role: str) -> str:
     return os.environ.get("SUBAGENT_MODEL", DEFAULT_SUBAGENT_MODEL)
 
 
-def get_search_provider() -> Literal["exa", "none"]:
+def get_search_provider() -> Literal["exa", "tavily", "none"]:
     provider = str(os.environ.get("SEARCH_PROVIDER", DEFAULT_SEARCH_PROVIDER)).strip().lower()
     if provider in SUPPORTED_SEARCH_PROVIDERS:
-        return cast(Literal["exa", "none"], provider)
+        return cast(Literal["exa", "tavily", "none"], provider)
     supported = ", ".join(SUPPORTED_SEARCH_PROVIDERS)
     raise SearchProviderConfigError(
         f"Invalid SEARCH_PROVIDER={provider!r}. Supported values: {supported}. "
-        "Set SEARCH_PROVIDER=exa (default) or SEARCH_PROVIDER=none."
+        "Set SEARCH_PROVIDER=exa (default), SEARCH_PROVIDER=tavily, or SEARCH_PROVIDER=none."
     )
 
 
@@ -139,6 +139,16 @@ def _resolve_required_exa_key() -> str:
     )
 
 
+def _resolve_required_tavily_key() -> str:
+    tavily_key = str(os.environ.get("TAVILY_API_KEY", "")).strip()
+    if tavily_key:
+        return tavily_key
+    raise SearchProviderConfigError(
+        "SEARCH_PROVIDER is set to 'tavily' but TAVILY_API_KEY is missing. "
+        "Set TAVILY_API_KEY in .env, or set SEARCH_PROVIDER=none to disable web search explicitly."
+    )
+
+
 def _load_exa_search_results_class():
     try:
         from langchain_exa import ExaSearchResults
@@ -150,15 +160,31 @@ def _load_exa_search_results_class():
     return ExaSearchResults
 
 
+def _load_tavily_search_results_class():
+    try:
+        from langchain_tavily import TavilySearchResults
+    except ImportError as exc:
+        raise SearchProviderConfigError(
+            "SEARCH_PROVIDER is set to 'tavily' but dependency 'langchain-tavily' is unavailable. "
+            "Install project dependencies (`pip install -e .`) or set SEARCH_PROVIDER=none."
+        ) from exc
+    return TavilySearchResults
+
+
 def validate_search_provider_configuration() -> str:
     """Validate configured search provider and return readiness guidance."""
     provider = get_search_provider()
     if provider == "none":
         return "Search provider disabled (`SEARCH_PROVIDER=none`)."
 
-    _resolve_required_exa_key()
-    _load_exa_search_results_class()
-    return "Search provider ready (`SEARCH_PROVIDER=exa`)."
+    if provider == "exa":
+        _resolve_required_exa_key()
+        _load_exa_search_results_class()
+        return "Search provider ready (`SEARCH_PROVIDER=exa`)."
+
+    _resolve_required_tavily_key()
+    _load_tavily_search_results_class()
+    return "Search provider ready (`SEARCH_PROVIDER=tavily`)."
 
 
 def get_llm(role: str = "orchestrator"):
@@ -179,7 +205,12 @@ def get_search_tool():
     if provider == "none":
         return None
 
-    exa_key = _resolve_required_exa_key()
-    exa_search_cls = _load_exa_search_results_class()
-    # ExaSearchResults is configured primarily at invocation time.
-    return exa_search_cls(exa_api_key=exa_key)
+    if provider == "exa":
+        exa_key = _resolve_required_exa_key()
+        exa_search_cls = _load_exa_search_results_class()
+        # ExaSearchResults is configured primarily at invocation time.
+        return exa_search_cls(exa_api_key=exa_key)
+
+    tavily_key = _resolve_required_tavily_key()
+    tavily_search_cls = _load_tavily_search_results_class()
+    return tavily_search_cls(api_key=tavily_key)

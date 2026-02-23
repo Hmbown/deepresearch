@@ -134,7 +134,7 @@ async def _run_validation() -> int:
 
     if _langsmith_enabled():
         langsmith_ok, langsmith_message = _verify_langsmith_trace(max_wait_seconds=30)
-        print(f"langsmith.enabled=true")
+        print("langsmith.enabled=true")
         print(f"langsmith.trace_check={'PASS' if langsmith_ok else 'FAIL'}")
         print(f"langsmith.detail={langsmith_message}")
         if not langsmith_ok:

@@ -6,6 +6,8 @@ Open-source LangGraph deep research agent with one runtime path:
 
 ## Quickstart
 
+Python 3.11+ is required.
+
 ```bash
 git clone https://github.com/Hmbown/deepresearch.git
 cd deepresearch
@@ -13,12 +15,16 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 [ -f .env ] || cp .env.example .env
-# Set EXA_API_KEY in .env (default SEARCH_PROVIDER=exa), or set SEARCH_PROVIDER=none explicitly.
+# Set EXA_API_KEY in .env (default SEARCH_PROVIDER=exa), or set SEARCH_PROVIDER=tavily and TAVILY_API_KEY, or set SEARCH_PROVIDER=none explicitly.
 python -m deepresearch.cli --preflight
 python -m deepresearch.cli "Compare retrieval strategies for production RAG systems"
 ```
 
 Dependencies are pinned in `pyproject.toml` for reproducible installs.
+
+## Output Format
+
+By default, the agent returns a structured research report directly in chat rather than writing files to disk. Responses are organized with section headings, include inline citations like `[1]`, and end with a `Sources` section that maps cited evidence to URLs. This format is designed to make claims traceable while keeping uncertainty explicit.
 
 ## Multi-turn Usage
 
@@ -53,6 +59,7 @@ asyncio.run(main())
 | `OPENAI_API_KEY` | Yes | — |
 | `SEARCH_PROVIDER` | No | `exa` |
 | `EXA_API_KEY` | Yes when `SEARCH_PROVIDER=exa` | — |
+| `TAVILY_API_KEY` | Yes when `SEARCH_PROVIDER=tavily` | — |
 | `ORCHESTRATOR_MODEL` | No | `openai:gpt-5.2` |
 | `SUBAGENT_MODEL` | No | `openai:gpt-5.2` |
 | `MAX_CONCURRENT_RESEARCH_UNITS` | No | `4` |

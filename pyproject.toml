@@ -22,9 +22,18 @@ dependencies = [
 [project.scripts]
 deepresearch = "deepresearch.cli:main"
 
+[project.optional-dependencies]
+dev = [
+    "ruff==0.13.0",
+]
+
 [build-system]
 requires = ["setuptools==82.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.package-dir]
 deepresearch = "src/deepresearch"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

@@ -101,11 +101,26 @@ def test_validate_search_provider_configuration_fails_for_missing_exa_key(monkey
         config.validate_search_provider_configuration()
 
 
+def test_validate_search_provider_configuration_fails_for_missing_tavily_key(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "tavily")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    with pytest.raises(config.SearchProviderConfigError, match="TAVILY_API_KEY"):
+        config.validate_search_provider_configuration()
+
+
 def test_validate_search_provider_configuration_fails_for_missing_exa_dependency(monkeypatch):
     monkeypatch.setenv("SEARCH_PROVIDER", "exa")
     monkeypatch.setenv("EXA_API_KEY", "exa-key")
     monkeypatch.setitem(sys.modules, "langchain_exa", None)
     with pytest.raises(config.SearchProviderConfigError, match="langchain-exa"):
+        config.validate_search_provider_configuration()
+
+
+def test_validate_search_provider_configuration_fails_for_missing_tavily_dependency(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "tavily")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
+    monkeypatch.setitem(sys.modules, "langchain_tavily", None)
+    with pytest.raises(config.SearchProviderConfigError, match="langchain-tavily"):
         config.validate_search_provider_configuration()
 
 
@@ -124,6 +139,23 @@ def test_get_search_tool_uses_exa_when_provider_is_configured(monkeypatch):
     tool = config.get_search_tool()
     assert tool.provider == "exa"
     assert tool.kwargs["exa_api_key"] == "exa-key"
+
+
+def test_get_search_tool_uses_tavily_when_provider_is_configured(monkeypatch):
+    class FakeTavilySearchResults:
+        def __init__(self, **kwargs):
+            self.provider = "tavily"
+            self.kwargs = kwargs
+
+    fake_langchain_tavily = types.SimpleNamespace(TavilySearchResults=FakeTavilySearchResults)
+
+    monkeypatch.setenv("SEARCH_PROVIDER", "tavily")
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
+    monkeypatch.setitem(sys.modules, "langchain_tavily", fake_langchain_tavily)
+
+    tool = config.get_search_tool()
+    assert tool.provider == "tavily"
+    assert tool.kwargs["api_key"] == "tavily-key"
 
 
 def test_get_search_tool_returns_none_when_provider_is_none(monkeypatch):
