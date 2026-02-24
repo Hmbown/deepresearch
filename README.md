@@ -8,7 +8,7 @@ Multi-agent research system built on [LangGraph](https://github.com/langchain-ai
 
 **Scope intake** reads the question and either proceeds directly or asks focused clarification turns until scope is clear for broad requests (question + boundary). For broad scoped requests that are ready to run, intake can present a short proposed research plan and wait for user confirmation (`start`) before execution. It generates a research brief that seeds the supervisor. On follow-up turns, it detects topic shifts and re-clarifies when the conversation diverges.
 
-**Supervisor** breaks the research brief into independent focused units and dispatches them via `ConductResearch` tool calls. Multiple calls in one turn execute in parallel (up to `MAX_CONCURRENT_RESEARCH_UNITS`, default 6). The supervisor enforces an evidence quality gate: it rejects `ResearchComplete` if collected evidence is insufficient (not enough sourced claims or too few source domains) and forces additional research iterations.
+**Supervisor** breaks the research brief into independent focused units and dispatches them via `ConductResearch` tool calls. Multiple calls in one turn execute in parallel (up to `MAX_CONCURRENT_RESEARCH_UNITS`, default 4). The supervisor enforces an evidence quality gate: it rejects `ResearchComplete` if collected evidence is insufficient (not enough sourced claims or too few source domains) and forces additional research iterations.
 
 **Researcher agents** are each a `create_deep_agent()` instance from the [deepagents](https://github.com/langchain-ai/deepagents) library with built-in middleware for context window summarization, large result eviction, and malformed tool call recovery. Each researcher has `search_web`, `fetch_url`, and `think_tool`. After completion, output is post-processed via `extract_research_from_messages()` to produce compressed notes, raw notes, and a typed evidence ledger (`EvidenceRecord` with claim, source URLs, confidence score, contradiction/uncertainty notes).
 
@@ -141,8 +141,10 @@ OPENAI_USE_RESPONSES_API=false
 
 | Variable | Default | Description |
 |---|---|---|
-| `MAX_CONCURRENT_RESEARCH_UNITS` | `6` | Parallel researcher invocations per supervisor step |
+| `MAX_CONCURRENT_RESEARCH_UNITS` | `4` | Parallel researcher invocations per supervisor step |
+| `MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT` | `5` | Max evidence claims extracted from each researcher output |
 | `MAX_RESEARCHER_ITERATIONS` | `16` | Total research units the supervisor can dispatch |
+| `MAX_SOURCE_URLS_PER_CLAIM` | `5` | Max source URLs retained per extracted evidence claim |
 | `MAX_REACT_TOOL_CALLS` | `20` | Hard cap on tool calls per researcher invocation |
 | `RESEARCHER_SEARCH_BUDGET` | `8` | Soft search budget hint per delegated research unit |
 | `SUPERVISOR_NOTES_MAX_BULLETS` | `20` | Max compressed note bullets retained per research unit |

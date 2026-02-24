@@ -178,6 +178,29 @@ def test_extract_evidence_records_source_section_bare_url_lines_excluded():
     assert not any("https://example.org/source-b" == c for c in claim_texts)
 
 
+def test_extract_evidence_records_respects_max_claims_per_research_unit(monkeypatch):
+    """Evidence parsing should enforce the configured per-research-unit claim cap."""
+    from deepresearch.researcher_subgraph import _extract_evidence_records
+
+    monkeypatch.setenv("MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT", "2")
+
+    text = (
+        "Key Findings\n"
+        "- First detailed finding about market access, backed by internal reports [1].\n"
+        "- Second detailed finding with revenue context and updated guidance [2].\n"
+        "- Third detailed finding with margin expansion trend in 2025 [3].\n"
+        "- Fourth detailed finding around valuation and demand [4].\n"
+        "Sources:\n"
+        "[1] https://example.com/alpha\n"
+        "[2] https://example.org/beta\n"
+        "[3] https://example.net/gamma\n"
+        "[4] https://example.io/delta\n"
+    )
+
+    records = _extract_evidence_records(text)
+    assert len(records) == 2
+
+
 def test_final_report_generation_preserves_evidence_ledger_source_transparency():
     result = asyncio.run(
         report.final_report_generation(

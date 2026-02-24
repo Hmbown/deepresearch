@@ -148,7 +148,9 @@ def test_int_env_config_keys_fall_back_to_defaults(monkeypatch):
     monkeypatch.setenv("MAX_REACT_TOOL_CALLS", "0")
     monkeypatch.setenv("MAX_CONCURRENT_RESEARCH_UNITS", "-3")
     monkeypatch.setenv("MAX_RESEARCHER_ITERATIONS", "-2")
+    monkeypatch.setenv("MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT", "0")
     monkeypatch.setenv("RESEARCHER_SEARCH_BUDGET", "abc")
+    monkeypatch.setenv("MAX_SOURCE_URLS_PER_CLAIM", "0")
     monkeypatch.setenv("SUPERVISOR_NOTES_MAX_BULLETS", "0")
     monkeypatch.setenv("SUPERVISOR_NOTES_WORD_BUDGET", "10")
     monkeypatch.setenv("SUPERVISOR_FINAL_REPORT_MAX_SECTIONS", "-10")
@@ -157,6 +159,11 @@ def test_int_env_config_keys_fall_back_to_defaults(monkeypatch):
     assert config.get_max_react_tool_calls() == config.DEFAULT_MAX_REACT_TOOL_CALLS
     assert config.get_max_concurrent_research_units() == config.DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS
     assert config.get_max_researcher_iterations() == config.DEFAULT_MAX_RESEARCHER_ITERATIONS
+    assert (
+        config.get_max_evidence_claims_per_research_unit()
+        == config.DEFAULT_MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT
+    )
+    assert config.get_max_source_urls_per_claim() == config.DEFAULT_MAX_SOURCE_URLS_PER_CLAIM
     assert config.get_researcher_search_budget() == config.DEFAULT_RESEARCHER_SEARCH_BUDGET
     assert config.get_supervisor_notes_max_bullets() == config.DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS
     assert config.get_supervisor_notes_word_budget() == config.DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET
@@ -171,6 +178,8 @@ def test_runtime_env_overrides_are_respected(monkeypatch):
     monkeypatch.setenv("MAX_REACT_TOOL_CALLS", "8")
     monkeypatch.setenv("MAX_CONCURRENT_RESEARCH_UNITS", "2")
     monkeypatch.setenv("MAX_RESEARCHER_ITERATIONS", "7")
+    monkeypatch.setenv("MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT", "6")
+    monkeypatch.setenv("MAX_SOURCE_URLS_PER_CLAIM", "12")
     monkeypatch.setenv("SUPERVISOR_NOTES_MAX_BULLETS", "12")
     monkeypatch.setenv("SUPERVISOR_NOTES_WORD_BUDGET", "350")
     monkeypatch.setenv("SUPERVISOR_FINAL_REPORT_MAX_SECTIONS", "5")
@@ -179,6 +188,8 @@ def test_runtime_env_overrides_are_respected(monkeypatch):
     assert config.get_max_react_tool_calls() == 8
     assert config.get_max_concurrent_research_units() == 2
     assert config.get_max_researcher_iterations() == 7
+    assert config.get_max_evidence_claims_per_research_unit() == 6
+    assert config.get_max_source_urls_per_claim() == 12
     assert config.get_supervisor_notes_max_bullets() == 12
     assert config.get_supervisor_notes_word_budget() == 350
     assert config.get_supervisor_final_report_max_sections() == 5
@@ -293,8 +304,10 @@ def test_search_budget_knobs_parse_and_default(monkeypatch):
 def test_runtime_defaults_use_extended_profile_values():
     assert config.DEFAULT_RESEARCHER_SEARCH_BUDGET == 15
     assert config.DEFAULT_MAX_REACT_TOOL_CALLS == 40
-    assert config.DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS == 6
+    assert config.DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS == 4
     assert config.DEFAULT_MAX_RESEARCHER_ITERATIONS == 60
+    assert config.DEFAULT_MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT == 5
+    assert config.DEFAULT_MAX_SOURCE_URLS_PER_CLAIM == 5
     assert config.DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS == 40
     assert config.DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET == 1200
     assert config.DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS == 12

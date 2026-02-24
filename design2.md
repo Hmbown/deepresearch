@@ -335,3 +335,42 @@ Before: After scoping, the system showed a hardcoded confirmation message with d
 After: Intake generates a `ResearchPlan` (structured output with scope, research tracks, evidence strategy, output format) via the orchestrator LLM, then formats it for user review. If plan generation fails, falls back to showing the research brief directly. The plan is topic-specific and gives the user a real preview of what 20 minutes of research will cover before they approve.
 
 New `RESEARCH_PLAN_PROMPT` added to `prompts.py`. New `ResearchPlan` Pydantic model added to `state.py`.
+
+### 2026-02-24 — Decouple claim cap and source cap in evidence extraction
+
+**Problem:** Evidence extraction used a single hard-coded cap (25 claims per researcher) but had no independent control over how many source URLs each claim could retain. Operators could not tune claim volume vs source breadth independently.
+
+**What changed:**
+
+Two new env-configurable knobs added to `config.py`:
+
+| Variable                              | Default | Purpose                                      |
+|---------------------------------------|---------|----------------------------------------------|
+| `MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT` | 5       | Cap on claims extracted per researcher result |
+| `MAX_SOURCE_URLS_PER_CLAIM`           | 5       | Cap on source URLs retained per claim         |
+
+`MAX_CONCURRENT_RESEARCH_UNITS` default was also lowered from 6 to 4 (already in code; design doc section 11 table previously said 6 — now corrected).
+
+**How they are wired:**
+
+- `researcher_subgraph.py:_extract_claim_lines()` reads `get_max_evidence_claims_per_research_unit()` to cap claim extraction.
+- `researcher_subgraph.py:_extract_evidence_records()` reads `get_max_source_urls_per_claim()` to independently cap URLs per claim, including citation-resolved, inline, and fallback URLs.
+- Both caps are read at call time via `_resolve_int_env()`, not at module load, so env overrides take effect immediately.
+- `.env.example` documents both knobs.
+
+**Architecture:** No new files, no new abstractions, no dual pipelines. Two new getter functions in `config.py`, two call sites in `researcher_subgraph.py`, tests in both focused test files.
+
+**Test results:**
+
+- `tests/test_config_and_cli.py`: 40/40 passed — covers default fallback, env override, and constant assertion for both knobs.
+- `tests/test_evidence_quality_gate.py`: 8/8 passed — includes `test_extract_evidence_records_respects_max_claims_per_research_unit` which sets `MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT=2` and asserts only 2 records are returned from 4-claim input.
+- Full suite: 174/174 passed, 1 skipped (SQLite checkpointer env-specific).
+- CLI entry point verified: `python3 -m deepresearch.cli --help` runs successfully.
+
+**Deployment status:** Committed and pushed to `main`.
+
+**Remaining risks / next steps:**
+
+- Section 11 table in this doc should be updated to include `MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT` and `MAX_SOURCE_URLS_PER_CLAIM` rows and correct `MAX_CONCURRENT_RESEARCH_UNITS` default from 6 to 4 — deferred to next doc pass.
+- No integration test yet that exercises both caps simultaneously in a live researcher run (unit tests cover the extraction logic in isolation).
+- The claim cap default of 5 is conservative; may need tuning upward once live output quality is assessed.

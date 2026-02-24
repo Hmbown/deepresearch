@@ -6,6 +6,8 @@ import re
 from typing import Any
 
 from .config import (
+    get_max_evidence_claims_per_research_unit,
+    get_max_source_urls_per_claim,
     get_max_react_tool_calls,
     get_model_string,
     get_researcher_search_budget,
@@ -104,7 +106,7 @@ def _extract_citation_url_map(text: str) -> dict[str, str]:
     return citation_map
 
 
-def _extract_claim_lines(text: str) -> list[str]:
+def _extract_claim_lines(text: str, max_claims: int) -> list[str]:
     claims: list[str] = []
     seen: set[str] = set()
     in_source_section = False
@@ -140,7 +142,7 @@ def _extract_claim_lines(text: str) -> list[str]:
             continue
         seen.add(dedupe_key)
         claims.append(cleaned)
-        if len(claims) >= 25:
+        if len(claims) >= max_claims:
             break
 
     return claims
@@ -158,23 +160,29 @@ def _extract_evidence_records(raw_text: str) -> list[EvidenceRecord]:
         if url and url not in deduped_all_urls:
             deduped_all_urls.append(url)
 
-    claim_lines = _extract_claim_lines(text)
+    max_claims_per_unit = get_max_evidence_claims_per_research_unit()
+    claim_lines = _extract_claim_lines(text, max_claims=max_claims_per_unit)
     if not claim_lines:
         first_sentence = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0].strip()
         if first_sentence:
             claim_lines = [first_sentence[:280]]
 
     records: list[EvidenceRecord] = []
+    max_urls_per_claim = get_max_source_urls_per_claim()
     for claim in claim_lines:
         urls: list[str] = []
         for citation_id in _CITATION_PATTERN.findall(claim):
             mapped_url = citation_map.get(citation_id)
             if mapped_url and mapped_url not in urls:
                 urls.append(mapped_url)
+            if len(urls) >= max_urls_per_claim:
+                break
         for url in _URL_PATTERN.findall(claim):
             normalized = _normalize_url(url)
             if normalized and normalized not in urls:
                 urls.append(normalized)
+            if len(urls) >= max_urls_per_claim:
+                break
         # Fallback: if a claim has citation markers that resolved to nothing and
         # there are few enough global URLs to be meaningful, assign them.
         if not urls:
@@ -182,6 +190,8 @@ def _extract_evidence_records(raw_text: str) -> list[EvidenceRecord]:
                 urls = [deduped_all_urls[0]]
             elif _CITATION_PATTERN.search(claim) and len(deduped_all_urls) <= 5:
                 urls = list(deduped_all_urls)
+            if len(urls) > max_urls_per_claim:
+                urls = urls[:max_urls_per_claim]
 
         uncertainty = claim if _UNCERTAINTY_PATTERN.search(claim) else None
         records.append(

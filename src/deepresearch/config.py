@@ -17,8 +17,10 @@ SUPPORTED_SEARCH_PROVIDERS = ("exa", "tavily", "none")
 DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES = 3
 DEFAULT_RESEARCHER_SEARCH_BUDGET = 15
 DEFAULT_MAX_REACT_TOOL_CALLS = 40
-DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS = 6
+DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS = 4
 DEFAULT_MAX_RESEARCHER_ITERATIONS = 60
+DEFAULT_MAX_SOURCE_URLS_PER_CLAIM = 5
+DEFAULT_MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT = 5
 DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS = 40
 DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET = 1200
 DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS = 12
@@ -84,6 +86,20 @@ def get_max_concurrent_research_units() -> int:
 def get_max_researcher_iterations() -> int:
     """Hard cap for total ConductResearch units dispatched in one supervisor run."""
     return _resolve_int_env("MAX_RESEARCHER_ITERATIONS", DEFAULT_MAX_RESEARCHER_ITERATIONS, minimum=1)
+
+
+def get_max_source_urls_per_claim() -> int:
+    """Configured cap for source URLs retained per extracted evidence claim."""
+    return _resolve_int_env("MAX_SOURCE_URLS_PER_CLAIM", DEFAULT_MAX_SOURCE_URLS_PER_CLAIM, minimum=1)
+
+
+def get_max_evidence_claims_per_research_unit() -> int:
+    """Configured cap for evidence claims extracted from one researcher result."""
+    return _resolve_int_env(
+        "MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT",
+        DEFAULT_MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT,
+        minimum=1,
+    )
 
 
 def get_supervisor_notes_max_bullets() -> int:
