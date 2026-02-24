@@ -94,6 +94,124 @@ def test_scope_intake_runs_intake_on_first_turn(monkeypatch):
     assert llm.structured_calls
 
 
+def test_scope_intake_blocks_broad_request_without_boundary_before_model_call(monkeypatch):
+    graph = _load_graph_module()
+    intake = importlib.import_module("deepresearch.intake")
+    llm = _FakeLLM(
+        structured_responses={
+            "ClarifyWithUser": [
+                SimpleNamespace(
+                    need_clarification=False,
+                    question="",
+                    verification="I will start now.",
+                )
+            ]
+        }
+    )
+    monkeypatch.setattr(intake, "get_llm", lambda role: llm)
+
+    command = asyncio.run(
+        graph.scope_intake(
+            {
+                "messages": [HumanMessage(content="Which stocks are most likely to go bankrupt?")],
+                "awaiting_clarification": False,
+                "intake_decision": None,
+                "research_brief": None,
+            }
+        )
+    )
+
+    assert command.goto == "__end__"
+    assert command.update["intake_decision"] == "clarify"
+    assert command.update["awaiting_clarification"] is True
+    question = command.update["messages"][0].content.lower()
+    assert "timeframe" in question
+    assert "geography" in question or "universe" in question
+    assert llm.structured_calls == []
+
+
+def test_scope_intake_offers_plan_checkpoint_for_broad_request_with_scope(monkeypatch):
+    graph = _load_graph_module()
+    intake = importlib.import_module("deepresearch.intake")
+    llm = _FakeLLM(
+        structured_responses={
+            "ResearchBrief": [
+                SimpleNamespace(research_brief="U.S. bankruptcy-risk stock screen from Feb 2026 onward.")
+            ],
+        }
+    )
+    monkeypatch.setattr(intake, "get_llm", lambda role: llm)
+
+    command = asyncio.run(
+        graph.scope_intake(
+            {
+                "messages": [
+                    HumanMessage(
+                        content=(
+                            "Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?"
+                        )
+                    )
+                ],
+                "awaiting_clarification": False,
+                "intake_decision": None,
+                "research_brief": None,
+            }
+        )
+    )
+
+    assert command.goto == "__end__"
+    assert command.update["intake_decision"] == "clarify"
+    assert command.update["awaiting_clarification"] is True
+    assert "reply \"start\"" in command.update["messages"][0].content.lower()
+    schemas_called = [schema for schema, _ in llm.structured_calls]
+    assert "ResearchBrief" in schemas_called
+
+
+def test_scope_intake_proceeds_after_plan_checkpoint_confirmation(monkeypatch):
+    graph = _load_graph_module()
+    intake = importlib.import_module("deepresearch.intake")
+    llm = _FakeLLM(
+        structured_responses={
+            "ClarifyWithUser": [
+                SimpleNamespace(
+                    need_clarification=False,
+                    question="",
+                    verification="Understood. I will start deep research now.",
+                )
+            ],
+            "ResearchBrief": [
+                SimpleNamespace(research_brief="U.S. bankruptcy-risk stock screen from Feb 2026 onward.")
+            ],
+        }
+    )
+    monkeypatch.setattr(intake, "get_llm", lambda role: llm)
+
+    command = asyncio.run(
+        graph.scope_intake(
+            {
+                "messages": [
+                    HumanMessage(
+                        content=(
+                            "Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?"
+                        )
+                    ),
+                    AIMessage(content='If this plan looks right, reply "start".'),
+                    HumanMessage(content="start"),
+                ],
+                "awaiting_clarification": True,
+                "intake_decision": "clarify",
+                "research_brief": "U.S. bankruptcy-risk stock screen from Feb 2026 onward.",
+            }
+        )
+    )
+
+    assert command.goto == "research_supervisor"
+    assert command.update["intake_decision"] == "proceed"
+    assert command.update["awaiting_clarification"] is False
+    assert command.update["research_brief"]
+    assert [schema for schema, _ in llm.structured_calls] == ["ClarifyWithUser", "ResearchBrief"]
+
+
 def test_scope_intake_bypasses_clarify_after_proceed(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
@@ -434,6 +552,8 @@ def test_supervisor_run_research_unit_extracts_notes_and_evidence(monkeypatch):
 def test_supervisor_finalize_marks_completion_when_research_complete_called(monkeypatch):
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
     monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 6)
+    monkeypatch.setattr(supervisor_subgraph, "_MIN_EVIDENCE_RECORDS_FOR_COMPLETION", 5)
+    monkeypatch.setattr(supervisor_subgraph, "_MIN_SOURCE_DOMAINS_FOR_COMPLETION", 3)
 
     state = {
         "pending_complete_calls": [{"id": "complete-1"}],
@@ -454,6 +574,24 @@ def test_supervisor_finalize_marks_completion_when_research_complete_called(monk
                 "claim": "Claim two [2].",
                 "source_urls": ["https://example.org/b"],
                 "confidence": 0.8,
+                "contradiction_or_uncertainty": None,
+            },
+            {
+                "claim": "Claim three [3].",
+                "source_urls": ["https://example.net/c"],
+                "confidence": 0.9,
+                "contradiction_or_uncertainty": None,
+            },
+            {
+                "claim": "Claim four [4].",
+                "source_urls": ["https://example.com/d"],
+                "confidence": 0.8,
+                "contradiction_or_uncertainty": None,
+            },
+            {
+                "claim": "Claim five [5].",
+                "source_urls": ["https://example.org/e"],
+                "confidence": 0.75,
                 "contradiction_or_uncertainty": None,
             },
         ],

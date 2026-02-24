@@ -17,7 +17,7 @@ from .config import get_supervisor_notes_max_bullets, get_supervisor_notes_word_
 from .message_utils import extract_text_content
 
 FALLBACK_CLARIFY_QUESTION = (
-    "Could you clarify the exact scope, constraints, and desired output format for this research?"
+    "Before I start, can you clarify the scope so I can research the right thing?"
 )
 FALLBACK_VERIFICATION = (
     "I have enough context to begin deep research now. I will break this into focused research "
@@ -33,6 +33,13 @@ FALLBACK_SUPERVISOR_NO_USEFUL_RESEARCH = (
 )
 FALLBACK_FOLLOWUP_CLARIFICATION = (
     "I want to ensure we are aligned: is your latest question still about the same research topic?"
+)
+FALLBACK_SCOPE_BOUNDARY_CLARIFICATION = (
+    "Before I start, can you set the scope for this broad request: what timeframe should I cover, "
+    "and what geography or target universe should I include?"
+)
+FALLBACK_PLAN_CONFIRMATION_FOOTER = (
+    'If this plan looks right, reply "start". If you want changes, tell me what to adjust.'
 )
 FOLLOW_UP_CONTINUATION_MARKERS = {
     "also",
@@ -110,6 +117,105 @@ STOP_TOKENS = {
     "me",
     "us",
 }
+_BROAD_SCOPE_NOUN_MARKERS = {
+    "benchmark",
+    "benchmarks",
+    "companies",
+    "countries",
+    "framework",
+    "frameworks",
+    "industry",
+    "industries",
+    "laws",
+    "markets",
+    "models",
+    "platforms",
+    "policies",
+    "providers",
+    "regions",
+    "risks",
+    "sectors",
+    "startups",
+    "stocks",
+    "tools",
+    "trends",
+    "universities",
+    "vendors",
+    "watchlist",
+}
+_BROAD_SCOPE_ACTION_MARKERS = {
+    "best",
+    "compare",
+    "find",
+    "identify",
+    "least",
+    "list",
+    "most",
+    "rank",
+    "screen",
+    "top",
+    "what are",
+    "which",
+}
+_SCOPE_TIMEFRAME_MARKERS = {
+    "after",
+    "as of",
+    "before",
+    "between",
+    "from",
+    "in 20",
+    "latest",
+    "next",
+    "onward",
+    "recent",
+    "since",
+    "through",
+    "throughout",
+    "today",
+    "until",
+    "yesterday",
+}
+_SCOPE_GEOGRAPHY_MARKERS = {
+    "africa",
+    "america",
+    "asia",
+    "australia",
+    "canada",
+    "china",
+    "europe",
+    "global",
+    "india",
+    "japan",
+    "latin america",
+    "middle east",
+    "uk",
+    "u.k.",
+    "u.s.",
+    "united kingdom",
+    "united states",
+    "usa",
+    "worldwide",
+}
+_SCOPE_UNIVERSE_MARKERS = {
+    "exchange",
+    "large cap",
+    "listed",
+    "microcap",
+    "mid cap",
+    "nasdaq",
+    "nyse",
+    "otc",
+    "public company",
+    "russell",
+    "s&p",
+    "small cap",
+}
+_SCOPE_YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
+_SCOPE_QUARTER_PATTERN = re.compile(r"\bq[1-4]\b")
+_SCOPE_MONTH_PATTERN = re.compile(
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+    r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b"
+)
 
 
 class ClarifyWithUser(BaseModel):
@@ -131,6 +237,21 @@ class ResearchBrief(BaseModel):
 
     research_brief: str = Field(
         description="Focused, concrete research brief synthesized from the full chat history.",
+    )
+
+
+class ResearchPlan(BaseModel):
+    """Structured research plan shown to user before execution begins."""
+
+    scope: str = Field(description="One-sentence summary of what will be researched and any boundaries.")
+    research_tracks: list[str] = Field(
+        description="Ordered list of focused research tracks that will be investigated in parallel.",
+    )
+    evidence_strategy: str = Field(
+        description="Brief description of evidence targets: what kinds of sources and how contradictions will be handled.",
+    )
+    output_format: str = Field(
+        description="Expected output format (e.g. 'memo-style report with inline citations').",
     )
 
 
@@ -279,6 +400,45 @@ def should_recheck_intent_on_follow_up(messages: list[Any]) -> bool:
         return True
 
     return True
+
+
+def _joined_human_text(messages: list[Any]) -> str:
+    return " ".join(text.lower() for text in human_texts(messages) if text)
+
+
+def is_broad_scope_request(messages: list[Any]) -> bool:
+    """Heuristic for broad asks that should be scoped before research starts."""
+    text = _joined_human_text(messages)
+    if not text:
+        return False
+    has_broad_noun = any(marker in text for marker in _BROAD_SCOPE_NOUN_MARKERS)
+    if not has_broad_noun:
+        return False
+    return any(marker in text for marker in _BROAD_SCOPE_ACTION_MARKERS)
+
+
+def has_scope_boundary(messages: list[Any]) -> bool:
+    """Return whether user messages include a concrete research boundary."""
+    text = _joined_human_text(messages)
+    if not text:
+        return False
+
+    has_timeframe = (
+        bool(_SCOPE_YEAR_PATTERN.search(text))
+        or bool(_SCOPE_QUARTER_PATTERN.search(text))
+        or bool(_SCOPE_MONTH_PATTERN.search(text))
+        or any(marker in text for marker in _SCOPE_TIMEFRAME_MARKERS)
+    )
+    if has_timeframe:
+        return True
+
+    has_geography = any(marker in text for marker in _SCOPE_GEOGRAPHY_MARKERS)
+    if not has_geography and re.search(r"\bus\b", text):
+        has_geography = True
+    if has_geography:
+        return True
+
+    return any(marker in text for marker in _SCOPE_UNIVERSE_MARKERS)
 
 
 def state_text_or_none(value: Any) -> str | None:

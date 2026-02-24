@@ -1,12 +1,12 @@
 # Deep Research
 
-Multi-agent research system built on [LangGraph](https://github.com/langchain-ai/langgraph). Takes a research question, optionally asks one clarifying question to tighten scope, dispatches multiple independent research tasks in parallel, and synthesizes a cited report with inline citations and source URLs.
+Multi-agent research system built on [LangGraph](https://github.com/langchain-ai/langgraph). Takes a research question, asks targeted clarification turns when scope is still unclear, dispatches multiple independent research tasks in parallel, and synthesizes a cited report with inline citations and source URLs.
 
 ![Architecture](docs/architecture.png)
 
 ## How It Works
 
-**Scope intake** reads the question and either proceeds directly or asks one clarifying question to narrow scope. It generates a research brief that seeds the supervisor. On follow-up turns, it detects topic shifts and re-clarifies when the conversation diverges.
+**Scope intake** reads the question and either proceeds directly or asks focused clarification turns until scope is clear for broad requests (question + boundary). For broad scoped requests that are ready to run, intake can present a short proposed research plan and wait for user confirmation (`start`) before execution. It generates a research brief that seeds the supervisor. On follow-up turns, it detects topic shifts and re-clarifies when the conversation diverges.
 
 **Supervisor** breaks the research brief into independent focused units and dispatches them via `ConductResearch` tool calls. Multiple calls in one turn execute in parallel (up to `MAX_CONCURRENT_RESEARCH_UNITS`, default 6). The supervisor enforces an evidence quality gate: it rejects `ResearchComplete` if collected evidence is insufficient (not enough sourced claims or too few source domains) and forces additional research iterations.
 

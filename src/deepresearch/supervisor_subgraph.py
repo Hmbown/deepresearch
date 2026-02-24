@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -18,7 +19,6 @@ from langgraph.types import Send
 from .config import (
     get_llm,
     get_max_concurrent_research_units,
-    get_max_react_tool_calls,
     get_max_researcher_iterations,
 )
 from .nodes import think_tool
@@ -41,8 +41,10 @@ from .state import (
 )
 
 _logger = logging.getLogger(__name__)
-_MIN_EVIDENCE_RECORDS_FOR_COMPLETION = 2
-_MIN_SOURCE_DOMAINS_FOR_COMPLETION = 2
+# Quality gate minimums — the supervisor cannot declare ResearchComplete until
+# these thresholds are met. Configurable via environment variables.
+_MIN_EVIDENCE_RECORDS_FOR_COMPLETION = int(os.environ.get("MIN_EVIDENCE_RECORDS", "5"))
+_MIN_SOURCE_DOMAINS_FOR_COMPLETION = int(os.environ.get("MIN_SOURCE_DOMAINS", "3"))
 _RECURSION_LIMIT_PATTERN = re.compile(r"Recursion limit of \d+ reached")
 _SUPERVISOR_PROGRESS_EVENT = "supervisor_progress"
 
@@ -129,6 +131,8 @@ def _evaluate_research_complete_gate(
         "cited_record_count": cited_record_count,
         "source_domain_count": len(source_domains),
         "source_domains": source_domains,
+        "min_evidence_records_required": _MIN_EVIDENCE_RECORDS_FOR_COMPLETION,
+        "min_source_domains_required": _MIN_SOURCE_DOMAINS_FOR_COMPLETION,
     }
 
     if record_count < _MIN_EVIDENCE_RECORDS_FOR_COMPLETION:
@@ -405,14 +409,9 @@ async def run_research_unit(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     researcher_graph = build_researcher_subgraph()
-    max_calls = get_max_react_tool_calls()
-    researcher_recursion_limit = max_calls * 2 + 1
     payload = {"messages": [HumanMessage(content=topic)]}
     try:
-        result = await researcher_graph.ainvoke(
-            payload,
-            config={"recursion_limit": researcher_recursion_limit},
-        )
+        result = await researcher_graph.ainvoke(payload)
     except Exception as exc:  # pragma: no cover - defensive guard
         failure_reason = _sanitize_research_unit_failure(exc)
         return {
@@ -476,6 +475,12 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
     dispatched_research_units = _coerce_non_negative_int(state.get("pending_dispatched_research_units", 0))
     skipped_research_units = _coerce_non_negative_int(state.get("pending_skipped_research_units", 0))
     remaining_iterations = _coerce_non_negative_int(state.get("pending_remaining_iterations", 0))
+    planned_research_calls_raw = state.get("pending_research_calls")
+    planned_research_calls = (
+        [call for call in planned_research_calls_raw if isinstance(call, dict)]
+        if isinstance(planned_research_calls_raw, list)
+        else []
+    )
 
     complete_calls_raw = state.get("pending_complete_calls")
     complete_calls = (
@@ -563,6 +568,13 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
         "evidence_record_count": gate_fields["evidence_record_count"],
         "source_domain_count": gate_fields["source_domain_count"],
         "source_domains": gate_fields["source_domains"],
+        "planned_research_units": [
+            {
+                "call_id": str(call.get("id") or ""),
+                "topic": state_text_or_none(call.get("topic")) or "",
+            }
+            for call in planned_research_calls
+        ],
         "research_units": research_units,
     }
     try:
@@ -605,10 +617,24 @@ async def supervisor_terminal(state: SupervisorState) -> dict[str, Any]:
     """Finalize the supervisor run and emit deterministic fallback when needed."""
     supervisor_messages = list(convert_to_messages(state.get("supervisor_messages", [])))
     supervisor_exception = state_text_or_none(state.get("supervisor_exception"))
+    research_iterations = _coerce_non_negative_int(state.get("research_iterations", 0))
+    max_iterations = get_max_researcher_iterations()
 
     has_tool_calls = _has_any_tool_calls(supervisor_messages)
     has_any_notes = bool(normalize_note_list(state.get("notes"))) or bool(normalize_note_list(state.get("raw_notes")))
     has_any_evidence = bool(normalize_evidence_ledger(state.get("evidence_ledger")))
+
+    # Log termination reason for observability
+    if research_iterations >= max_iterations and has_any_evidence:
+        log_runtime_event(
+            _logger,
+            "supervisor_iteration_cap_reached",
+            research_iterations=research_iterations,
+            max_researcher_iterations=max_iterations,
+            had_notes=has_any_notes,
+            had_evidence=has_any_evidence,
+        )
+
     if supervisor_exception or (not has_any_notes and not has_any_evidence):
         fallback_reason = "exception" if supervisor_exception else "no_notes"
         log_runtime_event(

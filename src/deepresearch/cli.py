@@ -44,6 +44,8 @@ _PRIMARY_NODE_NAMES = {
 _SEARCH_SOURCE_RE = re.compile(r"^\[Source\s+(\d+)\]", re.MULTILINE)
 _SEARCH_URL_RE = re.compile(r"^URL:\s*(.+)$", re.MULTILINE)
 _RECURSION_LIMIT_RE = re.compile(r"Recursion limit of (\d+) reached")
+_PLAN_CONFIRMATION_RE = re.compile(r"reply\s+[\"']?start[\"']?\s+.*(plan|research)", re.IGNORECASE)
+_RUN_RECURSION_LIMIT = 1000
 
 
 @dataclass
@@ -78,6 +80,11 @@ def _result_evidence_stats(result: dict[str, Any]) -> tuple[int, int]:
 
 def _result_section_title(result: dict[str, Any], elapsed_seconds: float | None = None) -> str:
     if result.get("intake_decision") == "clarify":
+        latest_text = _final_assistant_text(result)
+        if _PLAN_CONFIRMATION_RE.search(latest_text):
+            if elapsed_seconds is None:
+                return "RESEARCH PLAN"
+            return f"RESEARCH PLAN ({_format_duration(elapsed_seconds)})"
         if elapsed_seconds is None:
             return "CLARIFICATION"
         return f"CLARIFICATION ({_format_duration(elapsed_seconds)})"
@@ -128,7 +135,7 @@ def _summarize_research_failure(detail: str, unit_label: str) -> str:
     recursion_match = _RECURSION_LIMIT_RE.search(cleaned)
     if recursion_match:
         step_limit = recursion_match.group(1)
-        return f"{unit_label} hit tool call limit ({step_limit} steps); continuing with other research units."
+        return f"{unit_label} encountered a recursion limit ({step_limit} steps); continuing with other research units."
     return f"{unit_label} ended early: {_truncate(cleaned, 180)}"
 
 
@@ -275,6 +282,8 @@ class ProgressDisplay:
         self._research_wave = 0
         self._active_wave = 0
         self._wave_started_at: dict[int, float] = {}
+        self._wave_plan_announced: set[int] = set()
+        self._planned_track_index_by_call_id: dict[str, int] = {}
         self._pipeline_finished = False
         self._last_top_level_output: dict[str, Any] = {}
 
@@ -461,6 +470,9 @@ class ProgressDisplay:
     def _handle_research_unit_summary(self, summary: Mapping[str, Any], depth: int) -> None:
         status = str(summary.get("status", "")).strip().lower()
         topic = _truncate(str(summary.get("topic") or "[topic unavailable]"), 72)
+        call_id = str(summary.get("call_id") or "").strip()
+        planned_track_index = self._planned_track_index_by_call_id.get(call_id, 0) if call_id else 0
+        track_prefix = f"track[{planned_track_index}] " if planned_track_index > 0 else ""
         try:
             duration_seconds = max(0.0, float(summary.get("duration_seconds", 0.0)))
         except (TypeError, ValueError):
@@ -469,14 +481,49 @@ class ProgressDisplay:
 
         if status == "failed":
             reason = str(summary.get("failure_reason") or "research unit execution failed")
-            unit_label = f'researcher "{topic}"'
+            unit_label = f'{track_prefix}"{topic}"'.strip()
             self._emit(f"{_summarize_research_failure(reason, unit_label)} ({duration_label})", depth=max(1, depth))
         elif status == "empty":
-            self._emit(f'researcher "{topic}" returned no usable notes', depth=max(1, depth))
+            self._emit(f'{track_prefix}"{topic}" returned no usable notes', depth=max(1, depth))
         elif status == "skipped":
-            self._emit(f'researcher "{topic}" deferred due to runtime caps.', depth=max(1, depth))
+            self._emit(f'{track_prefix}"{topic}" deferred due to runtime caps.', depth=max(1, depth))
         elif status == "missing_topic":
-            self._emit("Supervisor issued ConductResearch without a research_topic.", depth=max(1, depth))
+            if planned_track_index > 0:
+                self._emit(
+                    f"{track_prefix}Supervisor issued ConductResearch without a research_topic.",
+                    depth=max(1, depth),
+                )
+            else:
+                self._emit("Supervisor issued ConductResearch without a research_topic.", depth=max(1, depth))
+
+    def _render_planned_research_tracks(self, progress: Mapping[str, Any], wave_index: int) -> None:
+        if wave_index in self._wave_plan_announced:
+            return
+
+        planned_units = progress.get("planned_research_units")
+        if not isinstance(planned_units, list):
+            return
+
+        track_entries: list[tuple[str, str]] = []
+        for item in planned_units:
+            if not isinstance(item, Mapping):
+                continue
+            topic = str(item.get("topic") or "").strip()
+            if not topic:
+                continue
+            call_id = str(item.get("call_id") or "").strip()
+            track_entries.append((call_id, topic))
+        if not track_entries:
+            return
+
+        self._emit("Research tracks:", depth=1)
+        for index, (_, topic) in enumerate(track_entries, start=1):
+            self._emit(f"[{index}] {_truncate(topic, 92)}", depth=2)
+        for index, (call_id, _) in enumerate(track_entries, start=1):
+            if not call_id:
+                continue
+            self._planned_track_index_by_call_id[call_id] = index
+        self._wave_plan_announced.add(wave_index)
 
     def _handle_supervisor_runtime_progress(self, progress: Mapping[str, Any], depth: int) -> None:
         self._sync_runtime_evidence_totals(progress)
@@ -498,6 +545,7 @@ class ProgressDisplay:
             if deferred_count > 0:
                 message += f" ({deferred_count} deferred by runtime caps)"
             self._emit(message, depth=0)
+            self._render_planned_research_tracks(progress, wave_index)
         else:
             self._emit(f"Supervisor iteration {supervisor_iteration}: evaluating quality gate.", depth=0)
 
@@ -700,7 +748,10 @@ def _get_app():
 
 
 def _thread_config(thread_id: str) -> dict[str, Any]:
-    cfg: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+    cfg: dict[str, Any] = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": _RUN_RECURSION_LIMIT,
+    }
     if online_evals_enabled():
         from .evals import attach_online_eval_callback
 

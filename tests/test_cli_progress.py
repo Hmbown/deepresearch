@@ -103,7 +103,7 @@ def test_progress_display_summarizes_recursion_limit_without_raw_error_url():
     )
 
     rendered = stream.getvalue()
-    assert "hit tool call limit (41 steps)" in rendered
+    assert "encountered a recursion limit (41 steps)" in rendered
     assert "GRAPH_RECURSION_LIMIT" not in rendered
 
 

@@ -140,7 +140,7 @@ def _extract_claim_lines(text: str) -> list[str]:
             continue
         seen.add(dedupe_key)
         claims.append(cleaned)
-        if len(claims) >= 12:
+        if len(claims) >= 25:
             break
 
     return claims

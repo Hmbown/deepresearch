@@ -12,15 +12,20 @@ from langgraph.graph import END
 from langgraph.types import Command
 
 from .config import get_llm, get_max_structured_output_retries
-from .prompts import CLARIFY_PROMPT, RESEARCH_BRIEF_PROMPT
+from .prompts import CLARIFY_PROMPT, RESEARCH_BRIEF_PROMPT, RESEARCH_PLAN_PROMPT
 from .runtime_utils import invoke_structured_with_retries
 from .state import (
     FALLBACK_CLARIFY_QUESTION,
     FALLBACK_FOLLOWUP_CLARIFICATION,
+    FALLBACK_PLAN_CONFIRMATION_FOOTER,
+    FALLBACK_SCOPE_BOUNDARY_CLARIFICATION,
     FALLBACK_VERIFICATION,
     ClarifyWithUser,
     ResearchBrief,
+    ResearchPlan,
     ResearchState,
+    has_scope_boundary,
+    is_broad_scope_request,
     latest_human_text,
     should_recheck_intent_on_follow_up,
     today_utc_date,
@@ -54,6 +59,49 @@ def _should_run_clarification_pass(state: ResearchState, messages: list[Any]) ->
         return _is_follow_up_topic_shift(state, messages)
 
     return True
+
+
+def _needs_scope_boundary_clarification(messages: list[Any]) -> bool:
+    return is_broad_scope_request(messages) and not has_scope_boundary(messages)
+
+
+def _should_offer_plan_confirmation(state: ResearchState, messages: list[Any]) -> bool:
+    if bool(state.get("awaiting_clarification")):
+        return False
+    if state.get("intake_decision") is not None:
+        return False
+    return is_broad_scope_request(messages) and has_scope_boundary(messages)
+
+
+def _format_plan_message(plan: ResearchPlan) -> str:
+    """Format a structured research plan for user confirmation."""
+    lines = ["Before I start research, here is the plan:\n"]
+    lines.append(f"**Scope:** {plan.scope}\n")
+    lines.append("**Research tracks:**")
+    for i, track in enumerate(plan.research_tracks, 1):
+        lines.append(f"  {i}. {track}")
+    lines.append(f"\n**Evidence strategy:** {plan.evidence_strategy}")
+    lines.append(f"**Output:** {plan.output_format}\n")
+    lines.append(FALLBACK_PLAN_CONFIRMATION_FOOTER)
+    return "\n".join(lines)
+
+
+async def _generate_research_plan(
+    research_brief: str, config: RunnableConfig = None,
+) -> ResearchPlan | None:
+    """Generate a structured research plan from the brief."""
+    structured_model = get_llm("orchestrator").with_structured_output(ResearchPlan)
+    prompt_content = RESEARCH_PLAN_PROMPT.format(
+        research_brief=research_brief,
+        date=today_utc_date(),
+    )
+    return await invoke_structured_with_retries(
+        structured_model,
+        prompt_content,
+        config,
+        schema_name="ResearchPlan",
+        max_retries=get_max_structured_output_retries(),
+    )
 
 
 async def _generate_research_brief(messages: list[Any], config: RunnableConfig = None) -> str:
@@ -111,6 +159,40 @@ async def scope_intake(
             goto=END,
             update={
                 "messages": [AIMessage(content=FALLBACK_CLARIFY_QUESTION)],
+                "intake_decision": "clarify",
+                "awaiting_clarification": True,
+            },
+        )
+
+    if _needs_scope_boundary_clarification(messages):
+        update = {
+            "messages": [AIMessage(content=FALLBACK_SCOPE_BOUNDARY_CLARIFICATION)],
+            "intake_decision": "clarify",
+            "awaiting_clarification": True,
+        }
+        if follow_up_topic_shift:
+            update.update(_build_topic_shift_reset_update())
+        return Command(
+            goto=END,
+            update=update,
+        )
+
+    if _should_offer_plan_confirmation(state, messages):
+        research_brief = await _generate_research_brief(messages, config)
+        plan = await _generate_research_plan(research_brief, config)
+        if plan is not None:
+            plan_message = _format_plan_message(plan)
+        else:
+            plan_message = (
+                f"Before I start research, here is the scope:\n\n"
+                f"{research_brief}\n\n"
+                f"{FALLBACK_PLAN_CONFIRMATION_FOOTER}"
+            )
+        return Command(
+            goto=END,
+            update={
+                "messages": [AIMessage(content=plan_message)],
+                "research_brief": research_brief,
                 "intake_decision": "clarify",
                 "awaiting_clarification": True,
             },

@@ -291,12 +291,12 @@ def test_search_budget_knobs_parse_and_default(monkeypatch):
 
 
 def test_runtime_defaults_use_extended_profile_values():
-    assert config.DEFAULT_RESEARCHER_SEARCH_BUDGET == 8
-    assert config.DEFAULT_MAX_REACT_TOOL_CALLS == 20
+    assert config.DEFAULT_RESEARCHER_SEARCH_BUDGET == 15
+    assert config.DEFAULT_MAX_REACT_TOOL_CALLS == 40
     assert config.DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS == 6
-    assert config.DEFAULT_MAX_RESEARCHER_ITERATIONS == 16
-    assert config.DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS == 20
-    assert config.DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET == 500
+    assert config.DEFAULT_MAX_RESEARCHER_ITERATIONS == 60
+    assert config.DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS == 40
+    assert config.DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET == 1200
     assert config.DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS == 12
 
 
@@ -343,7 +343,7 @@ def test_cli_run_invokes_app_with_human_message(monkeypatch):
     assert "messages" in payload
     assert payload["messages"][0].type == "human"
     assert payload["messages"][0].content == "test query"
-    assert config_payload == {"configurable": {"thread_id": "thread-test"}}
+    assert config_payload == {"configurable": {"thread_id": "thread-test"}, "recursion_limit": 1000}
 
 
 def test_cli_run_appends_prior_messages_when_provided(monkeypatch):
@@ -371,7 +371,7 @@ def test_cli_run_generates_thread_id_when_missing(monkeypatch):
     asyncio.run(cli.run("query without thread"))
     assert fake_app.ainvoke.await_count == 1
     config_payload = fake_app.ainvoke.await_args.kwargs["config"]
-    assert config_payload == {"configurable": {"thread_id": "generated-thread"}}
+    assert config_payload == {"configurable": {"thread_id": "generated-thread"}, "recursion_limit": 1000}
 
 
 def test_cli_result_section_title_uses_clarification_label():
@@ -380,6 +380,23 @@ def test_cli_result_section_title_uses_clarification_label():
         {"intake_decision": "clarify"},
         elapsed_seconds=12.0,
     ) == "CLARIFICATION (12s)"
+
+
+def test_cli_result_section_title_uses_research_plan_label_for_plan_checkpoint():
+    result = {
+        "intake_decision": "clarify",
+        "messages": [
+            SimpleNamespace(
+                type="ai",
+                content=(
+                    'Before I start research, here is the plan.\n'
+                    'If this plan looks right, reply "start" to launch research.'
+                ),
+            )
+        ],
+    }
+    assert cli._result_section_title(result) == "RESEARCH PLAN"
+    assert cli._result_section_title(result, elapsed_seconds=12.0) == "RESEARCH PLAN (12s)"
 
 
 def test_cli_result_section_title_defaults_to_research_report_with_stats():

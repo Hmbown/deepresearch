@@ -148,6 +148,88 @@ def test_progress_display_wave_dispatch_uses_runtime_progress_payload():
     assert "dispatching 2 researchers in parallel" in rendered
 
 
+def test_progress_display_renders_planned_research_tracks_for_wave():
+    stream = io.StringIO()
+    display = cli.ProgressDisplay(stream=stream)
+
+    display.handle_event(_supervisor_prepare_start_event())
+    display.handle_event(
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 1,
+                "requested_research_units": 2,
+                "dispatched_research_units": 2,
+                "skipped_research_units": 0,
+                "remaining_iterations": 16,
+                "max_concurrent_research_units": 6,
+                "max_researcher_iterations": 16,
+                "quality_gate_status": "none",
+                "quality_gate_reason": "",
+                "evidence_record_count": 0,
+                "source_domain_count": 0,
+                "source_domains": [],
+                "planned_research_units": [
+                    {
+                        "call_id": "call-1",
+                        "topic": "Identify going-concern and filing-based distress signals.",
+                    },
+                    {
+                        "call_id": "call-2",
+                        "topic": "Collect market and credit distress indicators for U.S. issuers.",
+                    },
+                ],
+                "research_units": [],
+            }
+        )
+    )
+
+    rendered = stream.getvalue()
+    assert "Research tracks:" in rendered
+    assert "[1] Identify going-concern and filing-based distress signals." in rendered
+    assert "[2] Collect market and credit distress indicators for U.S. issuers." in rendered
+
+
+def test_progress_display_failed_track_uses_planned_track_index_label():
+    stream = io.StringIO()
+    display = cli.ProgressDisplay(stream=stream)
+
+    display.handle_event(_supervisor_prepare_start_event())
+    display.handle_event(
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 1,
+                "requested_research_units": 2,
+                "dispatched_research_units": 2,
+                "skipped_research_units": 0,
+                "remaining_iterations": 16,
+                "max_concurrent_research_units": 6,
+                "max_researcher_iterations": 16,
+                "quality_gate_status": "none",
+                "quality_gate_reason": "",
+                "evidence_record_count": 0,
+                "source_domain_count": 0,
+                "source_domains": [],
+                "planned_research_units": [
+                    {"call_id": "call-1", "topic": "Track one topic"},
+                    {"call_id": "call-2", "topic": "Track two topic"},
+                ],
+                "research_units": [
+                    {
+                        "call_id": "call-2",
+                        "topic": "Track two topic",
+                        "status": "failed",
+                        "failure_reason": "Recursion limit of 41 reached",
+                        "duration_seconds": 2.0,
+                    }
+                ],
+            }
+        )
+    )
+
+    rendered = stream.getvalue()
+    assert 'track[2] "Track two topic" encountered a recursion limit (41 steps)' in rendered
+
+
 def test_progress_display_ignores_supervisor_tool_message_text_when_runtime_progress_present():
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)

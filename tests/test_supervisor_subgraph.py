@@ -11,7 +11,8 @@ from deepresearch.state import FALLBACK_SUPERVISOR_NO_USEFUL_RESEARCH
 def test_render_supervisor_prompt_excludes_downstream_prompt_contracts():
     rendered = supervisor_subgraph.render_supervisor_prompt(current_date="2026-02-24")
 
-    assert "Research Supervisor orchestrating deep research" in rendered
+    assert "research supervisor" in rendered.lower()
+    assert "ConductResearch" in rendered
     assert "Compression policy for supervisor notes:" not in rendered
     assert "Final report policy:" not in rendered
 

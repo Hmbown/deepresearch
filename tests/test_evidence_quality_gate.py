@@ -70,6 +70,8 @@ def test_supervisor_quality_gate_rejects_research_complete_without_evidence(monk
 def test_supervisor_quality_gate_accepts_research_complete_with_sufficient_evidence(monkeypatch):
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
     monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 6)
+    monkeypatch.setattr(supervisor_subgraph, "_MIN_EVIDENCE_RECORDS_FOR_COMPLETION", 5)
+    monkeypatch.setattr(supervisor_subgraph, "_MIN_SOURCE_DOMAINS_FOR_COMPLETION", 3)
 
     state = {
         "pending_complete_calls": [{"id": "complete-1"}],
@@ -91,6 +93,24 @@ def test_supervisor_quality_gate_accepts_research_complete_with_sufficient_evide
                 "source_urls": ["https://example.org/b"],
                 "confidence": 0.7,
                 "contradiction_or_uncertainty": "Evidence is mixed across regions.",
+            },
+            {
+                "claim": "Claim three [3].",
+                "source_urls": ["https://example.net/c"],
+                "confidence": 0.9,
+                "contradiction_or_uncertainty": None,
+            },
+            {
+                "claim": "Claim four [4].",
+                "source_urls": ["https://example.com/d"],
+                "confidence": 0.8,
+                "contradiction_or_uncertainty": None,
+            },
+            {
+                "claim": "Claim five [5].",
+                "source_urls": ["https://example.org/e"],
+                "confidence": 0.75,
+                "contradiction_or_uncertainty": None,
             },
         ],
         "research_iterations": 2,

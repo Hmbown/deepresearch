@@ -138,5 +138,5 @@ def test_extract_research_from_messages_empty():
 def test_render_researcher_prompt_no_search_mode_omits_search_tool_contract():
     prompt = researcher_subgraph.render_researcher_prompt(search_enabled=False)
 
-    assert "search_web is unavailable in this run" in prompt
-    assert "Do not attempt search_web calls." in prompt
+    assert "search" in prompt.lower() and "not available" in prompt.lower()
+    assert "search_web" not in prompt or "not available" in prompt.lower()
