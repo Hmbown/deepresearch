@@ -131,10 +131,18 @@ def test_scope_intake_blocks_broad_request_without_boundary_before_model_call(mo
 
 
 def test_scope_intake_offers_plan_checkpoint_for_broad_request_with_scope(monkeypatch):
+    """ClarifyWithUser runs first; when it says proceed on a broad query, a plan is shown."""
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
     llm = _FakeLLM(
         structured_responses={
+            "ClarifyWithUser": [
+                SimpleNamespace(
+                    need_clarification=False,
+                    question="",
+                    verification="Understood, proceeding.",
+                )
+            ],
             "ResearchBrief": [
                 SimpleNamespace(research_brief="U.S. bankruptcy-risk stock screen from Feb 2026 onward.")
             ],
@@ -164,21 +172,17 @@ def test_scope_intake_offers_plan_checkpoint_for_broad_request_with_scope(monkey
     assert command.update["awaiting_clarification"] is True
     assert "reply \"start\"" in command.update["messages"][0].content.lower()
     schemas_called = [schema for schema, _ in llm.structured_calls]
+    assert "ClarifyWithUser" in schemas_called
     assert "ResearchBrief" in schemas_called
 
 
 def test_scope_intake_proceeds_after_plan_checkpoint_confirmation(monkeypatch):
+    """When research_brief is set and awaiting_clarification is True, user response
+    triggers fast path — regenerate brief from full conversation and proceed."""
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
     llm = _FakeLLM(
         structured_responses={
-            "ClarifyWithUser": [
-                SimpleNamespace(
-                    need_clarification=False,
-                    question="",
-                    verification="Understood. I will start deep research now.",
-                )
-            ],
             "ResearchBrief": [
                 SimpleNamespace(research_brief="U.S. bankruptcy-risk stock screen from Feb 2026 onward.")
             ],
@@ -209,7 +213,10 @@ def test_scope_intake_proceeds_after_plan_checkpoint_confirmation(monkeypatch):
     assert command.update["intake_decision"] == "proceed"
     assert command.update["awaiting_clarification"] is False
     assert command.update["research_brief"]
-    assert [schema for schema, _ in llm.structured_calls] == ["ClarifyWithUser", "ResearchBrief"]
+    # Fast path should NOT run ClarifyWithUser — only ResearchBrief for regeneration
+    schemas_called = [schema for schema, _ in llm.structured_calls]
+    assert "ClarifyWithUser" not in schemas_called
+    assert "ResearchBrief" in schemas_called
 
 
 def test_scope_intake_bypasses_clarify_after_proceed(monkeypatch):

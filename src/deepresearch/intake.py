@@ -65,14 +65,6 @@ def _needs_scope_boundary_clarification(messages: list[Any]) -> bool:
     return is_broad_scope_request(messages) and not has_scope_boundary(messages)
 
 
-def _should_offer_plan_confirmation(state: ResearchState, messages: list[Any]) -> bool:
-    if bool(state.get("awaiting_clarification")):
-        return False
-    if state.get("intake_decision") is not None:
-        return False
-    return is_broad_scope_request(messages) and has_scope_boundary(messages)
-
-
 def _format_plan_message(plan: ResearchPlan) -> str:
     """Format a structured research plan for user confirmation."""
     lines = ["Before I start research, here is the plan:\n"]
@@ -145,6 +137,19 @@ async def scope_intake(
 ) -> Command[Literal["research_supervisor", "__end__"]]:
     """Handle clarification and brief synthesis before handing off to the supervisor."""
     messages = list(convert_to_messages(state.get("messages", [])))
+
+    # ── Fast path: plan was already shown, user is responding ──
+    # research_brief is only set when a plan has been generated and shown.
+    # Any user response after seeing the plan means "proceed" — the brief
+    # is regenerated from full conversation to incorporate any modifications.
+    if state.get("research_brief") and state.get("awaiting_clarification"):
+        research_brief = await _generate_research_brief(messages, config)
+        return Command(
+            goto="research_supervisor",
+            update=_build_research_handoff_update(research_brief),
+        )
+
+    # ── Follow-up without topic shift: skip clarification ──
     follow_up_topic_shift = _is_follow_up_topic_shift(state, messages)
     if not _should_run_clarification_pass(state, messages):
         research_brief = await _generate_research_brief(messages, config)
@@ -153,6 +158,7 @@ async def scope_intake(
             update=_build_research_handoff_update(research_brief),
         )
 
+    # ── No user text yet ──
     latest_user_text = latest_human_text(messages)
     if not latest_user_text:
         return Command(
@@ -164,6 +170,7 @@ async def scope_intake(
             },
         )
 
+    # ── Hard-coded scope boundary check (very broad, no boundary at all) ──
     if _needs_scope_boundary_clarification(messages):
         update = {
             "messages": [AIMessage(content=FALLBACK_SCOPE_BOUNDARY_CLARIFICATION)],
@@ -177,27 +184,7 @@ async def scope_intake(
             update=update,
         )
 
-    if _should_offer_plan_confirmation(state, messages):
-        research_brief = await _generate_research_brief(messages, config)
-        plan = await _generate_research_plan(research_brief, config)
-        if plan is not None:
-            plan_message = _format_plan_message(plan)
-        else:
-            plan_message = (
-                f"Before I start research, here is the scope:\n\n"
-                f"{research_brief}\n\n"
-                f"{FALLBACK_PLAN_CONFIRMATION_FOOTER}"
-            )
-        return Command(
-            goto=END,
-            update={
-                "messages": [AIMessage(content=plan_message)],
-                "research_brief": research_brief,
-                "intake_decision": "clarify",
-                "awaiting_clarification": True,
-            },
-        )
-
+    # ── LLM-based clarification check (always runs before plan) ──
     structured_model = get_llm("orchestrator").with_structured_output(ClarifyWithUser)
     prompt_content = CLARIFY_PROMPT.format(
         messages=get_buffer_string(messages),
@@ -232,8 +219,33 @@ async def scope_intake(
             update=update,
         )
 
-    verification = str(getattr(response, "verification", "")).strip() or FALLBACK_VERIFICATION
+    # ── ClarifyWithUser said proceed ──
     research_brief = await _generate_research_brief(messages, config)
+
+    # For broad/complex requests, show a plan preview before starting research.
+    # Simple/clear queries skip the plan and go straight to the supervisor.
+    if is_broad_scope_request(messages):
+        plan = await _generate_research_plan(research_brief, config)
+        if plan is not None:
+            plan_message = _format_plan_message(plan)
+        else:
+            plan_message = (
+                f"Before I start research, here is the scope:\n\n"
+                f"{research_brief}\n\n"
+                f"{FALLBACK_PLAN_CONFIRMATION_FOOTER}"
+            )
+        return Command(
+            goto=END,
+            update={
+                "messages": [AIMessage(content=plan_message)],
+                "research_brief": research_brief,
+                "intake_decision": "clarify",
+                "awaiting_clarification": True,
+            },
+        )
+
+    # Simple query — proceed directly to research.
+    verification = str(getattr(response, "verification", "")).strip() or FALLBACK_VERIFICATION
     update = _build_research_handoff_update(research_brief)
     update["messages"] = [AIMessage(content=verification)]
     return Command(
