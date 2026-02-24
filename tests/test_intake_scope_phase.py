@@ -219,6 +219,49 @@ def test_scope_intake_proceeds_after_plan_checkpoint_confirmation(monkeypatch):
     assert "ResearchBrief" in schemas_called
 
 
+def test_scope_intake_fast_path_requires_clarify_state(monkeypatch):
+    """Avoid fast-path regression when stale state sets `awaiting_clarification`.
+
+    If intake_decision is not "clarify", a stale research brief from prior runs must
+    not be treated as a plan-acknowledgment path.
+    """
+    graph = _load_graph_module()
+    intake = importlib.import_module("deepresearch.intake")
+    llm = _FakeLLM(
+        structured_responses={
+            "ClarifyWithUser": [
+                SimpleNamespace(
+                    need_clarification=True,
+                    question="Do you want to switch fully to the new topic?",
+                    verification="",
+                )
+            ],
+        }
+    )
+    monkeypatch.setattr(intake, "get_llm", lambda role: llm)
+
+    command = asyncio.run(
+        graph.scope_intake(
+            {
+                "messages": [
+                    HumanMessage(content="Research generative AI applications"),
+                    AIMessage(content="I can start with the prior brief."),
+                    HumanMessage(content="Switch to renewable energy instead."),
+                ],
+                "awaiting_clarification": True,
+                "intake_decision": "proceed",
+                "research_brief": "Prior research brief to be replaced",
+            }
+        )
+    )
+
+    assert command.goto == "__end__"
+    assert command.update["intake_decision"] == "clarify"
+    assert command.update["awaiting_clarification"] is True
+    assert command.update["research_brief"] is None
+    assert [schema for schema, _ in llm.structured_calls] == ["ClarifyWithUser"]
+
+
 def test_scope_intake_bypasses_clarify_after_proceed(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")

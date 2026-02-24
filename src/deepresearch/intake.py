@@ -142,7 +142,11 @@ async def scope_intake(
     # research_brief is only set when a plan has been generated and shown.
     # Any user response after seeing the plan means "proceed" — the brief
     # is regenerated from full conversation to incorporate any modifications.
-    if state.get("research_brief") and state.get("awaiting_clarification"):
+    if (
+        state.get("intake_decision") == "clarify"
+        and state.get("research_brief")
+        and state.get("awaiting_clarification")
+    ):
         research_brief = await _generate_research_brief(messages, config)
         return Command(
             goto="research_supervisor",

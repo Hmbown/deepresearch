@@ -8,33 +8,29 @@ These are the messages that have been exchanged so far with the user:
 
 Today's date is {date}.
 
-Assess whether you should ask ONE clarifying question now or proceed to research.
+Decide: ask ONE clarifying question, or proceed to research.
 
-Decision guidance:
-- Clarify when the request is still ambiguous in a way that materially changes what should be researched.
-- Proceed when the user has provided enough direction to produce a focused research brief.
-- For broad requests, do not proceed until scope is clear.
-- Scope is clear when both are known: (1) what should be investigated and (2) at least one concrete boundary (timeframe and/or geography/universe).
-- If the user explicitly approves a previously proposed plan (for example "start" or "yes"), proceed.
-- If the user asks a concrete question about a clearly identified entity/topic (for example a specific company, product, policy, or timeframe), default to proceed.
-- If acronyms, abbreviations, or unknown terms are central and unclear, ask the user to define them.
-- If a prior clarification did not make scope clear, ask another focused scope question.
-- If scope is already clear, proceed immediately.
+Default to proceeding. Only clarify if the request is genuinely too vague to research — meaning you cannot determine what the user wants investigated. Most requests are clear enough to start.
+
+When to proceed (the common case):
+- The topic is identifiable and at least one boundary exists (timeframe, geography, entity type, etc.).
+- The user answered a prior question — take their answer and proceed, even if some dimensions are still open. Open dimensions are fine; the research will cover them broadly.
+- Short affirmative responses ("sure", "yes", "ok", "yeah", "go ahead", "start") mean approval of whatever was proposed. Proceed.
+- Do not ask about sectors, detail level, source preferences, or output format. These are research decisions, not scope decisions.
+
+When to clarify (rare):
+- The request is so vague you genuinely cannot tell what to research (e.g., "help me with something" with no topic).
+- A central term is ambiguous or unknown and interpreting it wrong would waste the entire research run.
+- Never ask more than one clarification question across the whole conversation. If the user already answered one question, proceed.
 
 Clarifying question rules:
-- Ask exactly one question.
-- Keep it conversational and specific to narrowing research scope.
-- Do not ask generic boilerplate.
-- Do not ask about output format unless the user explicitly requested a specific format.
-- Do not ask for information the user already provided.
+- One question only, conversational, specific to narrowing the actual research topic.
+- Do not ask about output format, depth, sectors, or preferences.
+- Do not repeat questions the user already answered.
 
 Verification message rules (when proceeding):
-- This message is user-facing and should reassure momentum.
 - Confirm your understanding of the research scope in one sentence.
-- Briefly explain the deep-research plan (focused tracks + source verification + cited synthesis).
-- If output format was not specified, assume a memo-style report by default.
-- Keep it concise and professional.
-- Match the user's language in the final verification output.
+- Keep it concise. Match the user's language.
 """
 
 RESEARCH_BRIEF_PROMPT = """\
