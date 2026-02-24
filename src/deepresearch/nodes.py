@@ -72,14 +72,31 @@ def _normalize_text_key(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
+def _result_object_to_dict(obj: Any) -> dict[str, Any]:
+    """Convert a search result object (e.g. exa_py.api.Result) to a plain dict."""
+    if isinstance(obj, dict):
+        return obj
+    out: dict[str, Any] = {}
+    for attr in ("url", "title", "text", "content", "highlights", "score", "published_date", "author", "summary"):
+        val = getattr(obj, attr, None)
+        if val is not None:
+            out[attr] = val
+    return out or {"content": str(obj)}
+
+
 def _normalize_search_results(raw_output: Any) -> list[dict[str, Any]]:
     """Normalize heterogeneous search output shapes into a list of dicts."""
     if isinstance(raw_output, dict):
         if isinstance(raw_output.get("results"), list):
-            return [item if isinstance(item, dict) else {"content": str(item)} for item in raw_output["results"]]
+            return [_result_object_to_dict(item) for item in raw_output["results"]]
         return [raw_output]
+    # Handle SearchResponse-style objects with a .results list (e.g. exa_py.api.SearchResponse).
+    if not isinstance(raw_output, (list, str)) and hasattr(raw_output, "results"):
+        results_attr = raw_output.results
+        if isinstance(results_attr, list):
+            return [_result_object_to_dict(item) for item in results_attr]
     if isinstance(raw_output, list):
-        return [item if isinstance(item, dict) else {"content": str(item)} for item in raw_output]
+        return [_result_object_to_dict(item) for item in raw_output]
     if isinstance(raw_output, str):
         return [{"content": raw_output}]
     return [{"content": str(raw_output)}]
@@ -180,6 +197,9 @@ def _count_raw_result_items(raw_output: Any) -> int:
         return len(raw_output)
     if isinstance(raw_output, dict) and isinstance(raw_output.get("results"), list):
         return len(raw_output["results"])
+    # Handle SearchResponse-style objects with a .results list.
+    if hasattr(raw_output, "results") and isinstance(raw_output.results, list):
+        return len(raw_output.results)
     return 1
 
 

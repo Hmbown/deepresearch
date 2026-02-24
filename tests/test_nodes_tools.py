@@ -16,6 +16,29 @@ class _SearchToolReturnsError:
         return {"error": "provider unavailable"}
 
 
+class _FakeExaResult:
+    def __init__(self, title: str, url: str, text: str):
+        self.title = title
+        self.url = url
+        self.text = text
+        self.highlights = [text]
+
+
+class _FakeSearchResponse:
+    def __init__(self, results):
+        self.results = results
+
+
+class _SearchToolReturnsSearchResponse:
+    async def ainvoke(self, args, config=None):
+        return _FakeSearchResponse(
+            [
+                _FakeExaResult("Result A", "https://a.example/path", "alpha"),
+                _FakeExaResult("Result B", "https://b.example/path", "beta"),
+            ]
+        )
+
+
 def test_think_tool_returns_reflection_marker():
     output = nodes.think_tool.invoke({"reflection": "need one more source"})
     assert output == "Reflection recorded: need one more source"
@@ -78,6 +101,25 @@ def test_search_preprocessing_is_deterministic_and_llm_free():
     assert last_metric["deduped_count"] == 3
     assert last_metric["returned_count"] == 3
     assert last_metric["llm_calls_in_preprocess"] == 0
+
+
+def test_search_preprocessing_supports_searchresponse_objects():
+    metrics: list[dict] = []
+    search_tool = nodes._build_search_tool_with_processing(
+        base_search_tool=_SearchToolReturnsSearchResponse(),
+        writer=metrics.append,
+    )
+
+    output = asyncio.run(search_tool.ainvoke({"query": "exa response object"}))
+    assert "[Source 1]" in output
+    assert "https://a.example/path" in output
+    assert "https://b.example/path" in output
+
+    last_metric = metrics[-1]
+    assert last_metric["raw_result_count"] == 2
+    assert last_metric["normalized_count"] == 2
+    assert last_metric["deduped_count"] == 2
+    assert last_metric["returned_count"] == 2
 
 
 def test_fetch_url_extracts_content_with_trafilatura():

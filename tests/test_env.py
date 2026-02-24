@@ -100,6 +100,26 @@ def test_runtime_preflight_reports_invalid_search_provider(monkeypatch, tmp_path
     assert "Invalid SEARCH_PROVIDER" in by_name["search_provider"].message
 
 
+def test_runtime_preflight_reports_deepagents_dependency(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setattr(env, "missing_runtime_env_vars", lambda: [])
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
+    monkeypatch.setattr(env, "_dependency_available", lambda _: False)
+
+    ok, checks = env.runtime_preflight(project_name="deepresearch")
+
+    assert ok is False
+    by_name = {check.name: check for check in checks}
+    assert by_name["deepagents"].ok is False
+    assert "Missing required runtime dependency `deepagents`" in by_name["deepagents"].message
+
+
 def test_verify_langsmith_auth_accepts_langsmith_api_key_alias(monkeypatch, tmp_path):
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("", encoding="utf-8")
@@ -120,3 +140,89 @@ def test_verify_langsmith_auth_accepts_langsmith_api_key_alias(monkeypatch, tmp_
 
     assert ok is True
     assert "auth OK" in message
+
+
+def test_project_dotenv_path_uses_explicit_override(monkeypatch, tmp_path):
+    override_path = tmp_path / "custom.env"
+    monkeypatch.setenv("DEEPRESEARCH_ENV_FILE", str(override_path))
+
+    assert env.project_dotenv_path() == override_path
+
+
+def test_project_dotenv_path_discovers_cwd_template(monkeypatch, tmp_path):
+    project_root = tmp_path / "deepresearch"
+    project_root.mkdir()
+    (project_root / ".env.example").write_text("OPENAI_API_KEY=\n", encoding="utf-8")
+    (project_root / "pyproject.toml").write_text('[project]\nname = "deepresearch"\n', encoding="utf-8")
+
+    monkeypatch.delenv("DEEPRESEARCH_ENV_FILE", raising=False)
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", env._DEFAULT_PROJECT_DOTENV)
+    monkeypatch.chdir(project_root)
+
+    assert env.project_dotenv_path() == project_root / ".env"
+
+
+def test_runtime_preflight_allows_process_env_without_dotenv(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    monkeypatch.setenv("DEEPRESEARCH_ENV_FILE", str(dotenv_path))
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
+
+    ok, checks = env.runtime_preflight(project_name="deepresearch")
+
+    assert ok is True
+    by_name = {check.name: check for check in checks}
+    assert by_name["dotenv_file"].ok is True
+    assert "using environment variables" in by_name["dotenv_file"].message
+
+
+def test_update_project_dotenv_upserts_managed_keys_and_preserves_existing_entries(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "# existing comment\n"
+        "UNRELATED_KEY=keep-me\n"
+        "OPENAI_API_KEY=old-openai\n"
+        "export SEARCH_PROVIDER=none\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setattr(env, "_BOOTSTRAPPED_DOTENV", None)
+
+    updated_path = env.update_project_dotenv(
+        {
+            "OPENAI_API_KEY": "new-openai-key",
+            "SEARCH_PROVIDER": "exa",
+            "EXA_API_KEY": "new-exa-key",
+        }
+    )
+
+    contents = dotenv_path.read_text(encoding="utf-8")
+    assert updated_path == dotenv_path
+    assert "# existing comment" in contents
+    assert "UNRELATED_KEY=keep-me" in contents
+    assert contents.count("OPENAI_API_KEY=") == 1
+    assert "OPENAI_API_KEY=new-openai-key" in contents
+    assert "SEARCH_PROVIDER=exa" in contents
+    assert "EXA_API_KEY=new-exa-key" in contents
+    assert os.environ["OPENAI_API_KEY"] == "new-openai-key"
+
+
+def test_update_project_dotenv_honors_explicit_env_file_override(monkeypatch, tmp_path):
+    override_path = tmp_path / "custom.env"
+    override_path.write_text("UNRELATED=1", encoding="utf-8")
+
+    monkeypatch.setenv("DEEPRESEARCH_ENV_FILE", str(override_path))
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setattr(env, "_BOOTSTRAPPED_DOTENV", None)
+
+    updated_path = env.update_project_dotenv({"OPENAI_API_KEY": "override-key", "SEARCH_PROVIDER": "none"})
+
+    contents = override_path.read_text(encoding="utf-8")
+    assert updated_path == override_path
+    assert contents.startswith("UNRELATED=1\n")
+    assert "OPENAI_API_KEY=override-key" in contents
+    assert "SEARCH_PROVIDER=none" in contents

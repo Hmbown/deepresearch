@@ -34,6 +34,9 @@ python3 -m venv .venv
 source .venv/bin/activate    # Linux/macOS
 # .venv\Scripts\activate     # Windows
 
+# Important: install and run with the same interpreter.
+# Using `python`/`pip` from different environments leaves packages like `deepagents` unavailable.
+
 pip install -e .
 
 cp .env.example .env

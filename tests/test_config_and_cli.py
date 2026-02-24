@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from deepresearch import cli, config
+from deepresearch import cli, config, env
 
 
 def test_resolve_model_for_role_defaults_and_overrides(monkeypatch):
@@ -376,14 +376,167 @@ def test_cli_run_generates_thread_id_when_missing(monkeypatch):
 
 def test_cli_result_section_title_uses_clarification_label():
     assert cli._result_section_title({"intake_decision": "clarify"}) == "CLARIFICATION"
-    assert cli._result_section_title({"intake_decision": "proceed"}) == "RESPONSE"
+    assert cli._result_section_title(
+        {"intake_decision": "clarify"},
+        elapsed_seconds=12.0,
+    ) == "CLARIFICATION (12s)"
 
 
-def test_cli_result_section_title_defaults_to_response_without_decision():
-    assert cli._result_section_title({}) == "RESPONSE"
+def test_cli_result_section_title_defaults_to_research_report_with_stats():
+    result = {
+        "evidence_ledger": [
+            {"claim": "A", "source_urls": ["https://example.com/a"], "confidence": 0.5},
+            {"claim": "B", "source_urls": ["https://example.org/b"], "confidence": 0.5},
+        ]
+    }
+    assert cli._result_section_title(result) == "RESEARCH REPORT (2 evidence records | 2 sources)"
+    assert cli._result_section_title(result, elapsed_seconds=61.0) == (
+        "RESEARCH REPORT (2 evidence records | 2 sources | 1m 01s)"
+    )
 
 
 def test_cli_print_results_prints_no_response_message_when_ai_missing(capsys):
     cli.print_results({"messages": [SimpleNamespace(type="human", content="query")]})
     output = capsys.readouterr().out
     assert output.strip() == "No assistant response found."
+
+
+def test_cli_main_help_uses_argparse(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["deepresearch", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+
+
+def test_cli_main_preflight_flag(monkeypatch):
+    called = {}
+
+    def fake_print_preflight(project_name=None):
+        called["project_name"] = project_name
+        return 0
+
+    monkeypatch.setattr(cli, "print_preflight", fake_print_preflight)
+    monkeypatch.setattr(sys, "argv", ["deepresearch", "--preflight", "demo-project"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 0
+    assert called["project_name"] == "demo-project"
+
+
+def test_cli_main_setup_flag(monkeypatch):
+    called = {"count": 0}
+
+    def fake_run_setup_wizard():
+        called["count"] += 1
+        return 0
+
+    monkeypatch.setattr(cli, "run_setup_wizard", fake_run_setup_wizard)
+    monkeypatch.setattr(sys, "argv", ["deepresearch", "--setup"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 0
+    assert called["count"] == 1
+
+
+def test_cli_main_setup_rejects_query(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["deepresearch", "--setup", "why now"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+
+
+def test_cli_main_setup_rejects_combination_with_preflight(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["deepresearch", "--setup", "--preflight"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+
+
+def test_setup_wizard_writes_exa_path_and_runs_preflight(monkeypatch, tmp_path, capsys):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("UNRELATED_KEY=keep\nTAVILY_API_KEY=keep-tavily\n", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setattr(env, "_BOOTSTRAPPED_DOTENV", None)
+    prompts = iter(["exa", "n"])
+    secrets = iter(["openai-key-123", "exa-key-123"])
+    preflight_calls: list[str | None] = []
+
+    monkeypatch.setattr("builtins.input", lambda _="": next(prompts))
+    monkeypatch.setattr(cli, "getpass", lambda _="": next(secrets))
+    monkeypatch.setattr(cli, "print_preflight", lambda project_name=None: preflight_calls.append(project_name) or 0)
+
+    result = cli.run_setup_wizard()
+
+    output = capsys.readouterr().out
+    contents = dotenv_path.read_text(encoding="utf-8")
+    assert result == 0
+    assert preflight_calls == [None]
+    assert "OPENAI_API_KEY=openai-key-123" in contents
+    assert "SEARCH_PROVIDER=exa" in contents
+    assert "EXA_API_KEY=exa-key-123" in contents
+    assert "LANGCHAIN_TRACING_V2=false" in contents
+    assert "UNRELATED_KEY=keep" in contents
+    assert "TAVILY_API_KEY=keep-tavily" in contents
+    assert "openai-key-123" not in output
+    assert "exa-key-123" not in output
+
+
+def test_setup_wizard_writes_tavily_path(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("EXA_API_KEY=keep-exa\n", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setattr(env, "_BOOTSTRAPPED_DOTENV", None)
+    prompts = iter(["tavily", "n"])
+    secrets = iter(["openai-tavily", "tavily-secret"])
+    preflight_calls: list[str | None] = []
+
+    monkeypatch.setattr("builtins.input", lambda _="": next(prompts))
+    monkeypatch.setattr(cli, "getpass", lambda _="": next(secrets))
+    monkeypatch.setattr(cli, "print_preflight", lambda project_name=None: preflight_calls.append(project_name) or 0)
+
+    result = cli.run_setup_wizard()
+
+    contents = dotenv_path.read_text(encoding="utf-8")
+    assert result == 0
+    assert preflight_calls == [None]
+    assert "OPENAI_API_KEY=openai-tavily" in contents
+    assert "SEARCH_PROVIDER=tavily" in contents
+    assert "TAVILY_API_KEY=tavily-secret" in contents
+    assert "LANGCHAIN_TRACING_V2=false" in contents
+    assert "EXA_API_KEY=keep-exa" in contents
+
+
+def test_setup_wizard_langsmith_path_defaults_project_and_can_open_browser(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setattr(env, "_BOOTSTRAPPED_DOTENV", None)
+    prompts = iter(["none", "y", "", "y"])
+    secrets = iter(["openai-langsmith", "langsmith-secret"])
+    preflight_calls: list[str | None] = []
+    browser_calls: list[str] = []
+
+    monkeypatch.setattr("builtins.input", lambda _="": next(prompts))
+    monkeypatch.setattr(cli, "getpass", lambda _="": next(secrets))
+    monkeypatch.setattr(cli, "print_preflight", lambda project_name=None: preflight_calls.append(project_name) or 0)
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: browser_calls.append(url) or True)
+
+    result = cli.run_setup_wizard()
+
+    contents = dotenv_path.read_text(encoding="utf-8")
+    assert result == 0
+    assert preflight_calls == ["deepresearch-local"]
+    assert browser_calls == ["https://smith.langchain.com/"]
+    assert "OPENAI_API_KEY=openai-langsmith" in contents
+    assert "SEARCH_PROVIDER=none" in contents
+    assert "LANGCHAIN_TRACING_V2=true" in contents
+    assert "LANGCHAIN_API_KEY=langsmith-secret" in contents
+    assert "LANGCHAIN_PROJECT=deepresearch-local" in contents
