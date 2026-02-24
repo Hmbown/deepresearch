@@ -34,9 +34,6 @@ python3 -m venv .venv
 source .venv/bin/activate    # Linux/macOS
 # .venv\Scripts\activate     # Windows
 
-# Important: install and run with the same interpreter.
-# Using `python`/`pip` from different environments leaves packages like `deepagents` unavailable.
-
 pip install -e .
 
 cp .env.example .env
@@ -63,18 +60,46 @@ Run the preflight check to validate your setup:
 python -m deepresearch.cli --preflight
 ```
 
-This checks `.env` loading, required API keys, search provider configuration, and LangSmith auth (if enabled).
+## Usage
 
-Run your first query:
+The graph is a standard LangGraph application. You can run it anywhere LangGraph runs: Studio, LangServe, programmatically, or from the included CLI.
+
+### LangGraph Studio (recommended for development)
+
+```bash
+uvx --refresh --from "langgraph-cli[inmem]" --with-editable . --python 3.11 langgraph dev --allow-blocking
+```
+
+Opens the Studio UI with visual graph traces, state inspection, and step-through debugging. The repo includes a `langgraph.json` that configures the graph automatically.
+
+### Programmatic
+
+```python
+import asyncio
+from deepresearch.graph import app
+
+async def main():
+    result = await app.ainvoke(
+        {"messages": [{"role": "user", "content": "Your research question"}]},
+        config={"configurable": {"thread_id": "my-thread"}},
+    )
+    print(result["messages"][-1].content)
+
+asyncio.run(main())
+```
+
+### CLI
+
+A terminal interface with live progress display is included for quick runs and interactive sessions:
 
 ```bash
 deepresearch "What are the latest advances in quantum error correction?"
-```
 
-Or use the module directly:
-
-```bash
+# or via module
 python -m deepresearch.cli "Compare retrieval strategies for production RAG systems"
+
+# interactive multi-turn mode
+deepresearch
 ```
 
 ## Configuration
@@ -151,47 +176,31 @@ The evidence ledger flows through the full pipeline. The supervisor quality gate
 
 ## Multi-turn Usage
 
-Supports conversational follow-ups. Reuse the same `thread_id` and pass previous messages:
+The agent supports conversational follow-ups. Reuse the same `thread_id` across invocations:
 
 ```python
 import asyncio
-from deepresearch.cli import run
+from deepresearch.graph import app
 
 async def main():
-    thread_id = "demo-thread"
-    messages = []
-    for turn in [
+    config = {"configurable": {"thread_id": "demo-thread"}}
+    for question in [
         "Research the current state of nuclear fusion energy.",
         "Focus specifically on private sector investments since 2023.",
         "Now compare the leading companies by funding raised.",
     ]:
-        result = await run(turn, thread_id=thread_id, prior_messages=messages)
-        messages = list(result.get("messages", messages))
+        result = await app.ainvoke(
+            {"messages": [{"role": "user", "content": question}]},
+            config=config,
+        )
+        print(result["messages"][-1].content)
 
 asyncio.run(main())
 ```
 
 The agent detects whether a follow-up is a continuation or a topic shift. Continuations trigger a new research cycle on the same scope. Topic shifts reset state and re-run intake.
 
-For interactive multi-turn sessions from the CLI, run without arguments:
-
-```bash
-deepresearch
-```
-
-Type follow-ups at the prompt. Type `exit` or `quit` to end.
-
-## LangGraph Studio
-
 ![LangSmith Studio Graph](docs/langsmith-studio.png)
-
-The repo includes a `langgraph.json` for Studio support:
-
-```bash
-uvx --refresh --from "langgraph-cli[inmem]" --with-editable . --python 3.11 langgraph dev --allow-blocking
-```
-
-Opens the Studio UI with visual graph traces. The graph flow is: `__start__` -> `scope_intake` -> `research_supervisor` -> `final_report_generation` -> `__end__`, with a conditional clarification path from `scope_intake` that returns to the user when clarification is needed.
 
 ## Output Format
 
@@ -232,7 +241,7 @@ pip install -e ".[dev]"
 pytest tests/ -q
 ```
 
-140 tests, all hermetic (no network calls, deterministic mocks). Covers evidence extraction, checkpointer persistence (MemorySaver + SQLite), Responses API behavior, thread continuity, the supervisor quality gate, and multi-turn topic shift detection.
+168 tests, all hermetic (no network calls, deterministic mocks). Covers evidence extraction, checkpointer persistence (MemorySaver + SQLite), Responses API behavior, thread continuity, the supervisor quality gate, runtime progress reporting, and multi-turn topic shift detection.
 
 ## Online Evaluations
 
