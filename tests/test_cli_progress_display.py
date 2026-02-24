@@ -5,6 +5,24 @@ import io
 from deepresearch import cli
 
 
+def _supervisor_prepare_start_event() -> dict[str, object]:
+    return {
+        "event": "on_chain_start",
+        "name": "supervisor_prepare",
+        "metadata": {"checkpoint_ns": "research_supervisor|supervisor_prepare"},
+        "data": {"input": {}},
+    }
+
+
+def _supervisor_progress_event(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        "event": "on_custom_event",
+        "name": "supervisor_progress",
+        "metadata": {"checkpoint_ns": "research_supervisor|supervisor_finalize"},
+        "data": payload,
+    }
+
+
 def test_progress_display_search_summary_renders_count_and_domains():
     stream = io.StringIO()
     display = cli.ProgressDisplay(verbose=True, stream=stream)
@@ -75,30 +93,23 @@ def test_progress_display_quality_gate_rejection_is_user_visible():
     display = cli.ProgressDisplay(stream=stream)
 
     display.handle_event(
-        {
-            "event": "on_chain_end",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {
-                "output": {
-                    "runtime_progress": {
-                        "supervisor_iteration": 2,
-                        "requested_research_units": 0,
-                        "dispatched_research_units": 0,
-                        "skipped_research_units": 0,
-                        "remaining_iterations": 10,
-                        "max_concurrent_research_units": 6,
-                        "max_researcher_iterations": 16,
-                        "quality_gate_status": "retry",
-                        "quality_gate_reason": "insufficient_source_domains",
-                        "evidence_record_count": 1,
-                        "source_domain_count": 1,
-                        "source_domains": ["example.com"],
-                        "research_units": [],
-                    }
-                }
-            },
-        }
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 2,
+                "requested_research_units": 0,
+                "dispatched_research_units": 0,
+                "skipped_research_units": 0,
+                "remaining_iterations": 10,
+                "max_concurrent_research_units": 6,
+                "max_researcher_iterations": 16,
+                "quality_gate_status": "retry",
+                "quality_gate_reason": "insufficient_source_domains",
+                "evidence_record_count": 1,
+                "source_domain_count": 1,
+                "source_domains": ["example.com"],
+                "research_units": [],
+            }
+        )
     )
 
     rendered = stream.getvalue()
@@ -111,40 +122,26 @@ def test_progress_display_wave_dispatch_uses_runtime_progress_payload():
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
 
-    display.handle_event(
-        {
-            "event": "on_chain_start",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {"input": {}},
-        }
-    )
+    display.handle_event(_supervisor_prepare_start_event())
 
     display.handle_event(
-        {
-            "event": "on_chain_end",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {
-                "output": {
-                    "runtime_progress": {
-                        "supervisor_iteration": 1,
-                        "requested_research_units": 2,
-                        "dispatched_research_units": 2,
-                        "skipped_research_units": 0,
-                        "remaining_iterations": 16,
-                        "max_concurrent_research_units": 6,
-                        "max_researcher_iterations": 16,
-                        "quality_gate_status": "none",
-                        "quality_gate_reason": "",
-                        "evidence_record_count": 0,
-                        "source_domain_count": 0,
-                        "source_domains": [],
-                        "research_units": [],
-                    }
-                }
-            },
-        }
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 1,
+                "requested_research_units": 2,
+                "dispatched_research_units": 2,
+                "skipped_research_units": 0,
+                "remaining_iterations": 16,
+                "max_concurrent_research_units": 6,
+                "max_researcher_iterations": 16,
+                "quality_gate_status": "none",
+                "quality_gate_reason": "",
+                "evidence_record_count": 0,
+                "source_domain_count": 0,
+                "source_domains": [],
+                "research_units": [],
+            }
+        )
     )
 
     rendered = stream.getvalue()
@@ -155,46 +152,25 @@ def test_progress_display_ignores_supervisor_tool_message_text_when_runtime_prog
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
 
+    display.handle_event(_supervisor_prepare_start_event())
     display.handle_event(
-        {
-            "event": "on_chain_start",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {"input": {}},
-        }
-    )
-    display.handle_event(
-        {
-            "event": "on_chain_end",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {
-                "output": {
-                    "supervisor_messages": [
-                        {
-                            "type": "tool",
-                            "content": "[ResearchComplete received]",
-                            "name": "ResearchComplete",
-                        }
-                    ],
-                    "runtime_progress": {
-                        "supervisor_iteration": 3,
-                        "requested_research_units": 0,
-                        "dispatched_research_units": 0,
-                        "skipped_research_units": 0,
-                        "remaining_iterations": 7,
-                        "max_concurrent_research_units": 6,
-                        "max_researcher_iterations": 16,
-                        "quality_gate_status": "retry",
-                        "quality_gate_reason": "insufficient_evidence_records",
-                        "evidence_record_count": 1,
-                        "source_domain_count": 1,
-                        "source_domains": ["example.com"],
-                        "research_units": [],
-                    },
-                }
-            },
-        }
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 3,
+                "requested_research_units": 0,
+                "dispatched_research_units": 0,
+                "skipped_research_units": 0,
+                "remaining_iterations": 7,
+                "max_concurrent_research_units": 6,
+                "max_researcher_iterations": 16,
+                "quality_gate_status": "retry",
+                "quality_gate_reason": "insufficient_evidence_records",
+                "evidence_record_count": 1,
+                "source_domain_count": 1,
+                "source_domains": ["example.com"],
+                "research_units": [],
+            }
+        )
     )
 
     rendered = stream.getvalue()
@@ -211,16 +187,16 @@ def test_progress_display_no_dispatch_or_gate_output_when_runtime_progress_absen
     display.handle_event(
         {
             "event": "on_chain_start",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
+            "name": "supervisor_prepare",
+            "metadata": {"checkpoint_ns": "research_supervisor|supervisor_prepare"},
             "data": {"input": {}},
         }
     )
     display.handle_event(
         {
             "event": "on_chain_end",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
+            "name": "supervisor_finalize",
+            "metadata": {"checkpoint_ns": "research_supervisor|supervisor_finalize"},
             "data": {
                 "output": {
                     "supervisor_messages": [
@@ -252,28 +228,14 @@ def test_progress_display_handles_partial_runtime_progress_gracefully():
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
 
+    display.handle_event(_supervisor_prepare_start_event())
     display.handle_event(
-        {
-            "event": "on_chain_start",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {"input": {}},
-        }
-    )
-    display.handle_event(
-        {
-            "event": "on_chain_end",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {
-                "output": {
-                    "runtime_progress": {
-                        "supervisor_iteration": 1,
-                        "dispatched_research_units": 3,
-                    }
-                }
-            },
-        }
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 1,
+                "dispatched_research_units": 3,
+            }
+        )
     )
 
     rendered = stream.getvalue()
@@ -286,44 +248,25 @@ def test_progress_display_does_not_derive_dispatch_count_from_tool_call_count():
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
 
+    display.handle_event(_supervisor_prepare_start_event())
     display.handle_event(
-        {
-            "event": "on_chain_start",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {"input": {}},
-        }
-    )
-    display.handle_event(
-        {
-            "event": "on_chain_end",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
-            "data": {
-                "output": {
-                    "supervisor_messages": [
-                        {"type": "tool", "content": "Topic A findings", "name": "ConductResearch"},
-                        {"type": "tool", "content": "Topic B findings", "name": "ConductResearch"},
-                        {"type": "tool", "content": "Topic C findings", "name": "ConductResearch"},
-                    ],
-                    "runtime_progress": {
-                        "supervisor_iteration": 1,
-                        "requested_research_units": 3,
-                        "dispatched_research_units": 2,
-                        "skipped_research_units": 1,
-                        "remaining_iterations": 14,
-                        "max_concurrent_research_units": 2,
-                        "max_researcher_iterations": 16,
-                        "quality_gate_status": "none",
-                        "quality_gate_reason": None,
-                        "evidence_record_count": 0,
-                        "source_domain_count": 0,
-                        "source_domains": [],
-                        "research_units": [],
-                    },
-                }
-            },
-        }
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 1,
+                "requested_research_units": 3,
+                "dispatched_research_units": 2,
+                "skipped_research_units": 1,
+                "remaining_iterations": 14,
+                "max_concurrent_research_units": 2,
+                "max_researcher_iterations": 16,
+                "quality_gate_status": "none",
+                "quality_gate_reason": None,
+                "evidence_record_count": 0,
+                "source_domain_count": 0,
+                "source_domains": [],
+                "research_units": [],
+            }
+        )
     )
 
     rendered = stream.getvalue()

@@ -179,7 +179,15 @@ class SupervisorState(TypedDict, total=False):
     research_iterations: int
     raw_notes: Annotated[list[str], operator.add]
     evidence_ledger: Annotated[list[EvidenceRecord], operator.add]
-    runtime_progress: dict[str, Any]
+    pending_research_calls: list[dict[str, Any]]
+    pending_complete_calls: list[dict[str, Any]]
+    pending_requested_research_units: int
+    pending_dispatched_research_units: int
+    pending_skipped_research_units: int
+    pending_remaining_iterations: int
+    research_unit_summaries: Annotated[list[dict[str, Any]], operator.add]
+    research_unit_summaries_consumed: int
+    supervisor_exception: str | None
 
 
 class ResearchState(MessagesState):
@@ -340,55 +348,6 @@ def is_token_limit_error(exc: Exception) -> bool:
         "max tokens",
     )
     return any(marker in message for marker in token_markers)
-
-
-def extract_tool_calls(message: Any) -> list[dict[str, Any]]:
-    """Normalize tool call payloads from AI messages across provider shapes."""
-    tool_calls = getattr(message, "tool_calls", None)
-    if isinstance(tool_calls, list) and tool_calls:
-        normalized: list[dict[str, Any]] = []
-        for idx, call in enumerate(tool_calls):
-            if not isinstance(call, dict):
-                continue
-            call_id = str(call.get("id") or f"tool_call_{idx}")
-            normalized.append(
-                {
-                    "id": call_id,
-                    "name": str(call.get("name") or ""),
-                    "args": call.get("args") if isinstance(call.get("args"), dict) else {},
-                }
-            )
-        if normalized:
-            return normalized
-
-    additional_kwargs = getattr(message, "additional_kwargs", {})
-    if not isinstance(additional_kwargs, dict):
-        return []
-
-    raw_tool_calls = additional_kwargs.get("tool_calls")
-    if not isinstance(raw_tool_calls, list):
-        return []
-
-    normalized = []
-    for idx, call in enumerate(raw_tool_calls):
-        if not isinstance(call, dict):
-            continue
-        function_payload = call.get("function") if isinstance(call.get("function"), dict) else {}
-        name = str(call.get("name") or function_payload.get("name") or "")
-        args_payload = call.get("args", function_payload.get("arguments", {}))
-        args: dict[str, Any]
-        if isinstance(args_payload, dict):
-            args = args_payload
-        elif isinstance(args_payload, str):
-            try:
-                parsed = json.loads(args_payload)
-                args = parsed if isinstance(parsed, dict) else {}
-            except json.JSONDecodeError:
-                args = {}
-        else:
-            args = {}
-        normalized.append({"id": str(call.get("id") or f"tool_call_{idx}"), "name": name, "args": args})
-    return normalized
 
 
 def latest_ai_message(messages: list[Any]) -> AIMessage | None:

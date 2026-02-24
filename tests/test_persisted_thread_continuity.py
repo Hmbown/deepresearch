@@ -111,7 +111,8 @@ def test_persisted_thread_checkpointer_clarify_then_proceed(monkeypatch):
 
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
+    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph.ainvoke)
+    monkeypatch.setattr(graph, "build_supervisor_subgraph", lambda: supervisor_graph.ainvoke)
 
     app = graph.build_app(checkpointer=MemorySaver())
     cfg = _thread_config("thread-persisted-clarify")
@@ -168,7 +169,8 @@ def test_persisted_thread_topic_shift_resets_state_without_stale_note_leakage(mo
 
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
+    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph.ainvoke)
+    monkeypatch.setattr(graph, "build_supervisor_subgraph", lambda: supervisor_graph.ainvoke)
 
     app = graph.build_app(checkpointer=MemorySaver())
     cfg = _thread_config("thread-persisted-shift")
@@ -241,7 +243,8 @@ def test_persisted_follow_up_continuity_resets_handoff_notes_before_new_supervis
 
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
+    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph.ainvoke)
+    monkeypatch.setattr(graph, "build_supervisor_subgraph", lambda: supervisor_graph.ainvoke)
 
     app = graph.build_app(checkpointer=MemorySaver())
     cfg = _thread_config("thread-persisted-continuity")
@@ -315,7 +318,8 @@ def test_persisted_thread_evidence_ledger_continuity(monkeypatch):
 
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph_mock)
+    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph_mock.ainvoke)
+    monkeypatch.setattr(graph, "build_supervisor_subgraph", lambda: supervisor_graph_mock.ainvoke)
 
     app = graph.build_app(checkpointer=MemorySaver())
     cfg = _thread_config("thread-evidence-ledger")
@@ -327,14 +331,13 @@ def test_persisted_thread_evidence_ledger_continuity(monkeypatch):
         )
     )
 
+    from deepresearch.state import normalize_evidence_ledger
+
+    normalized_evidence = normalize_evidence_ledger(result["evidence_ledger"])
     assert result["intake_decision"] == "proceed"
-    assert result["evidence_ledger"]
-    assert any(r.source_urls for r in result["evidence_ledger"] if hasattr(r, "source_urls"))
-    assert any(
-        r.contradiction_or_uncertainty
-        for r in result["evidence_ledger"]
-        if hasattr(r, "contradiction_or_uncertainty")
-    )
+    assert normalized_evidence
+    assert any(r.source_urls for r in normalized_evidence)
+    assert any(r.contradiction_or_uncertainty for r in normalized_evidence)
     assert "Sources:" in result["final_report"]
 
 
@@ -392,7 +395,8 @@ def test_sqlite_checkpointer_clarify_then_proceed(monkeypatch, tmp_path):
 
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph_mock)
+    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph_mock.ainvoke)
+    monkeypatch.setattr(graph, "build_supervisor_subgraph", lambda: supervisor_graph_mock.ainvoke)
 
     db_path = str(tmp_path / "test_checkpoint.db")
 

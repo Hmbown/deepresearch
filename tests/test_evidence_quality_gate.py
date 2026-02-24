@@ -46,38 +46,39 @@ def test_extract_research_from_messages_emits_typed_evidence_records():
 
 
 def test_supervisor_quality_gate_rejects_research_complete_without_evidence(monkeypatch):
-    graph = _load_graph_module()
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
     monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 6)
 
     state = {
-        "supervisor_messages": [
-            AIMessage(content="", tool_calls=[{"id": "complete-1", "name": "ResearchComplete", "args": {}}]),
-        ],
-        "notes": [],
-        "raw_notes": [],
+        "pending_complete_calls": [{"id": "complete-1"}],
+        "pending_requested_research_units": 0,
+        "pending_dispatched_research_units": 0,
+        "pending_skipped_research_units": 0,
+        "pending_remaining_iterations": 4,
+        "research_unit_summaries": [],
+        "research_unit_summaries_consumed": 0,
         "evidence_ledger": [],
         "research_iterations": 2,
     }
 
-    result = asyncio.run(graph.supervisor_tools(state))
+    result = asyncio.run(supervisor_subgraph.supervisor_finalize(state))
     assert result["research_iterations"] == 3
     assert any("ResearchComplete rejected" in msg.content for msg in result["supervisor_messages"])
-    assert result["runtime_progress"]["quality_gate_status"] == "retry"
-    assert result["runtime_progress"]["quality_gate_reason"] == "insufficient_evidence_records"
+    assert any("insufficient_evidence_records" in msg.content for msg in result["supervisor_messages"])
 
 
 def test_supervisor_quality_gate_accepts_research_complete_with_sufficient_evidence(monkeypatch):
-    graph = _load_graph_module()
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
     monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 6)
 
     state = {
-        "supervisor_messages": [
-            AIMessage(content="", tool_calls=[{"id": "complete-1", "name": "ResearchComplete", "args": {}}]),
-        ],
-        "notes": [],
-        "raw_notes": [],
+        "pending_complete_calls": [{"id": "complete-1"}],
+        "pending_requested_research_units": 0,
+        "pending_dispatched_research_units": 0,
+        "pending_skipped_research_units": 0,
+        "pending_remaining_iterations": 4,
+        "research_unit_summaries": [],
+        "research_unit_summaries_consumed": 0,
         "evidence_ledger": [
             {
                 "claim": "Claim one [1].",
@@ -95,11 +96,9 @@ def test_supervisor_quality_gate_accepts_research_complete_with_sufficient_evide
         "research_iterations": 2,
     }
 
-    result = asyncio.run(graph.supervisor_tools(state))
+    result = asyncio.run(supervisor_subgraph.supervisor_finalize(state))
     assert result["research_iterations"] == 6
     assert any("ResearchComplete received" in msg.content for msg in result["supervisor_messages"])
-    assert result["runtime_progress"]["quality_gate_status"] == "pass"
-    assert result["runtime_progress"]["source_domain_count"] == 2
 
 
 def test_extract_evidence_records_handles_dash_prefixed_citation_urls():

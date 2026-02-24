@@ -35,7 +35,9 @@ _PRIMARY_NODE_NAMES = {
     "scope_intake",
     "research_supervisor",
     "supervisor",
-    "supervisor_tools",
+    "supervisor_prepare",
+    "supervisor_finalize",
+    "supervisor_terminal",
     "final_report_generation",
 }
 
@@ -178,11 +180,10 @@ def _format_domain_list(domains: list[str], max_items: int = 3) -> str:
     return f"{', '.join(domains[:max_items])}, ..."
 
 
-def _extract_runtime_progress_payload(output: Mapping[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(output, Mapping):
+def _extract_supervisor_progress_payload(event_name: str, data: Mapping[str, Any] | None) -> dict[str, Any]:
+    if event_name != "supervisor_progress" or not isinstance(data, Mapping):
         return {}
-    payload = output.get("runtime_progress")
-    return dict(payload) if isinstance(payload, Mapping) else {}
+    return dict(data)
 
 
 def _collect_evidence_from_research_output(output: Mapping[str, Any] | None) -> tuple[list[Any], list[str]]:
@@ -477,20 +478,20 @@ class ProgressDisplay:
         elif status == "missing_topic":
             self._emit("Supervisor issued ConductResearch without a research_topic.", depth=max(1, depth))
 
-    def _handle_supervisor_runtime_progress(self, output: Mapping[str, Any], depth: int) -> None:
-        progress = _extract_runtime_progress_payload(output)
-        if not progress:
-            return
-
+    def _handle_supervisor_runtime_progress(self, progress: Mapping[str, Any], depth: int) -> None:
         self._sync_runtime_evidence_totals(progress)
         requested_count = self._coerce_non_negative_int(progress.get("requested_research_units"), 0)
         dispatch_count = self._coerce_non_negative_int(progress.get("dispatched_research_units"), 0)
         skipped_count = self._coerce_non_negative_int(progress.get("skipped_research_units"), 0)
         supervisor_iteration = self._coerce_non_negative_int(progress.get("supervisor_iteration"), 1)
+        wave_index = self._active_wave
+        if wave_index == 0:
+            self._research_wave += 1
+            wave_index = self._research_wave
 
         if dispatch_count > 0:
             message = (
-                f"Wave {self._active_wave}: Supervisor iteration {supervisor_iteration} - "
+                f"Wave {wave_index}: Supervisor iteration {supervisor_iteration} - "
                 f"dispatching {dispatch_count} researcher{'s' if dispatch_count != 1 else ''} in parallel"
             )
             deferred_count = max(skipped_count, max(0, requested_count - dispatch_count))
@@ -510,6 +511,16 @@ class ProgressDisplay:
         quality_gate_reason = str(progress.get("quality_gate_reason") or "")
         self._handle_quality_gate(quality_gate_status, quality_gate_reason, depth)
 
+        wave_elapsed = _format_duration(time.monotonic() - self._wave_started_at.get(wave_index, self._start))
+        self._emit(
+            (
+                f"Wave {wave_index} complete in {wave_elapsed}: "
+                f"{self._evidence_record_count} evidence records, {len(self._evidence_domains)} domains"
+            ),
+            depth=0,
+        )
+        self._active_wave = 0
+
     def _handle_chain_start(
         self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None
     ) -> None:
@@ -524,7 +535,7 @@ class ProgressDisplay:
             self._start_phase("PHASE 2: RESEARCH")
             return
 
-        if event_name == "supervisor_tools":
+        if event_name == "supervisor_prepare":
             self._research_wave += 1
             self._active_wave = self._research_wave
             self._wave_started_at[self._active_wave] = time.monotonic()
@@ -550,19 +561,6 @@ class ProgressDisplay:
             return
 
         checkpoint_ns = str((metadata or {}).get("checkpoint_ns", "")) if isinstance(metadata, Mapping) else ""
-        if event_name == "supervisor_tools":
-            self._handle_supervisor_runtime_progress(data.get("output", {}), self._depth(metadata) + 1)
-            if self._active_wave:
-                wave_elapsed = _format_duration(time.monotonic() - self._wave_started_at.get(self._active_wave, self._start))
-                self._emit(
-                    (
-                        f"Wave {self._active_wave} complete in {wave_elapsed}: "
-                        f"{self._evidence_record_count} evidence records, {len(self._evidence_domains)} domains"
-                    ),
-                    depth=0,
-                )
-                self._active_wave = 0
-
         if checkpoint_ns in self._active_research and event_name in {"LangGraph", "deep-researcher"}:
             output = data.get("output")
             if isinstance(output, Mapping):
@@ -659,6 +657,12 @@ class ProgressDisplay:
             if text:
                 self._emit(f"[model] {_truncate(text, 120)}", depth=depth)
 
+    def _handle_custom_event(self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None) -> None:
+        progress = _extract_supervisor_progress_payload(event_name, data)
+        if not progress:
+            return
+        self._handle_supervisor_runtime_progress(progress, self._depth(metadata) + 1)
+
     def handle_event(self, event: Mapping[str, Any]) -> dict[str, Any] | None:
         event_type = str(event.get("event", ""))
         name = str(event.get("name", ""))
@@ -670,6 +674,9 @@ class ProgressDisplay:
 
         if event_type in _TOOL_EVENT_TYPES:
             self._handle_tool_event(event_type, name, metadata, data)
+
+        if event_type == "on_custom_event":
+            self._handle_custom_event(name, metadata, data)
 
         if event_type == "on_chain_error":
             self._handle_chain_error(metadata, data)

@@ -273,7 +273,6 @@ def test_app_stops_at_clarification_when_needed(monkeypatch):
 
 
 def test_app_multi_turn_clarify_then_proceed_uses_message_history(monkeypatch):
-    graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
@@ -295,19 +294,18 @@ def test_app_multi_turn_clarify_then_proceed_uses_message_history(monkeypatch):
         },
         freeform_responses=[AIMessage(content="Final synthesized answer [1].")],
     )
-    supervisor_graph = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value={
-                "supervisor_messages": [HumanMessage(content="Research brief for test.")],
-                "notes": ["supervisor note [1]"],
-                "raw_notes": ["raw note [1]"],
-            }
-        )
+    supervisor_graph = AsyncMock(
+        return_value={
+            "supervisor_messages": [HumanMessage(content="Research brief for test.")],
+            "notes": ["supervisor note [1]"],
+            "raw_notes": ["raw note [1]"],
+        }
     )
 
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
     monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
+    graph = _load_graph_module()
 
     first_result = asyncio.run(
         graph.app.ainvoke(
@@ -319,7 +317,7 @@ def test_app_multi_turn_clarify_then_proceed_uses_message_history(monkeypatch):
     assert first_result["intake_decision"] == "clarify"
     assert first_result["awaiting_clarification"] is True
     assert "market segment" in first_result["messages"][-1].content.lower()
-    assert supervisor_graph.ainvoke.await_count == 0
+    assert supervisor_graph.await_count == 0
 
     follow_up_messages = list(first_result["messages"]) + [
         HumanMessage(content="Focus on high-end datacenter GPUs.")
@@ -335,7 +333,7 @@ def test_app_multi_turn_clarify_then_proceed_uses_message_history(monkeypatch):
     assert second_result["awaiting_clarification"] is False
     assert "Final synthesized answer [1]." in second_result["final_report"]
     assert "Sources:" in second_result["final_report"]
-    assert supervisor_graph.ainvoke.await_count == 1
+    assert supervisor_graph.await_count == 1
 
 
 def test_scope_intake_initializes_supervisor_state(monkeypatch):
@@ -374,159 +372,8 @@ def test_scope_intake_initializes_supervisor_state(monkeypatch):
     assert result["awaiting_clarification"] is False
 
 
-def test_research_supervisor_falls_back_to_clarify_without_brief():
-    graph = _load_graph_module()
-    result = asyncio.run(graph.research_supervisor({"messages": []}))
-    assert result["intake_decision"] == "clarify"
-    assert result["awaiting_clarification"] is True
-
-
-def test_research_supervisor_invokes_subgraph_and_returns_notes(monkeypatch):
-    graph = _load_graph_module()
+def test_supervisor_prepare_runs_parallel_dispatch_planning_and_enforces_cap(monkeypatch):
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    supervisor_graph = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value={
-                "supervisor_messages": [
-                    HumanMessage(content="brief"),
-                    AIMessage(content="delegated"),
-                ],
-                "notes": ["note [1]"],
-                "raw_notes": ["raw note [1]"],
-            }
-        )
-    )
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
-
-    result = asyncio.run(
-        graph.research_supervisor(
-            {
-                "messages": [HumanMessage(content="What are the key cloud cost controls?")],
-                "research_brief": "Cloud cost controls",
-                "supervisor_messages": [],
-                "notes": [],
-                "raw_notes": [],
-            }
-        )
-    )
-
-    assert result["intake_decision"] == "proceed"
-    assert result["awaiting_clarification"] is False
-    assert result["notes"] == ["note [1]"]
-    assert result["raw_notes"] == ["raw note [1]"]
-    assert supervisor_graph.ainvoke.await_count == 1
-
-
-def test_research_supervisor_returns_note_deltas_when_seed_notes_present(monkeypatch):
-    graph = _load_graph_module()
-    supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    seed_notes = ["existing note [1]"]
-    seed_raw_notes = ["existing raw [1]"]
-    supervisor_graph = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value={
-                "supervisor_messages": [
-                    HumanMessage(content="Cloud cost controls"),
-                    AIMessage(content="delegated"),
-                ],
-                "notes": seed_notes + ["new note [2]"],
-                "raw_notes": seed_raw_notes + ["new raw [2]"],
-            }
-        )
-    )
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
-
-    result = asyncio.run(
-        graph.research_supervisor(
-            {
-                "messages": [HumanMessage(content="Add more detail on tagging policies.")],
-                "research_brief": "Cloud cost controls",
-                "supervisor_messages": [],
-                "notes": seed_notes,
-                "raw_notes": seed_raw_notes,
-            }
-        )
-    )
-
-    assert result["notes"] == ["new note [2]"]
-    assert result["raw_notes"] == ["new raw [2]"]
-
-
-def test_research_supervisor_returns_empty_note_deltas_when_no_new_notes(monkeypatch):
-    graph = _load_graph_module()
-    supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    seed_notes = ["existing note [1]"]
-    seed_raw_notes = ["existing raw [1]"]
-    supervisor_graph = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value={
-                "supervisor_messages": [
-                    HumanMessage(content="Cloud cost controls"),
-                    AIMessage(content="delegated"),
-                ],
-                "notes": list(seed_notes),
-                "raw_notes": list(seed_raw_notes),
-            }
-        )
-    )
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
-
-    result = asyncio.run(
-        graph.research_supervisor(
-            {
-                "messages": [HumanMessage(content="What did you find?")],
-                "research_brief": "Cloud cost controls",
-                "supervisor_messages": [],
-                "notes": seed_notes,
-                "raw_notes": seed_raw_notes,
-            }
-        )
-    )
-
-    assert result["notes"] == []
-    assert result["raw_notes"] == []
-
-
-def test_research_supervisor_handles_subgraph_failure_without_echoing_seed_notes(monkeypatch):
-    graph = _load_graph_module()
-    supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    seed_notes = ["existing note [1]"]
-    seed_raw_notes = ["existing raw [1]"]
-    supervisor_graph = SimpleNamespace(ainvoke=AsyncMock(side_effect=RuntimeError("boom")))
-    monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
-
-    result = asyncio.run(
-        graph.research_supervisor(
-            {
-                "messages": [HumanMessage(content="Continue.")],
-                "research_brief": "Cloud cost controls",
-                "supervisor_messages": [],
-                "notes": seed_notes,
-                "raw_notes": seed_raw_notes,
-            }
-        )
-    )
-
-    assert result["intake_decision"] == "proceed"
-    assert result["awaiting_clarification"] is False
-    assert result["notes"] == []
-    assert result["raw_notes"] == []
-    assert supervisor_graph.ainvoke.await_count == 1
-
-
-def test_supervisor_tools_runs_parallel_research_and_enforces_cap(monkeypatch):
-    graph = _load_graph_module()
-    supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    researcher_graph = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value={
-                "messages": [
-                    AIMessage(content="compressed finding [1]"),
-                ],
-            }
-        )
-    )
-    monkeypatch.setattr(supervisor_subgraph, "build_researcher_subgraph", lambda: researcher_graph)
     monkeypatch.setattr(supervisor_subgraph, "get_max_concurrent_research_units", lambda: 1)
     monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 3)
 
@@ -547,41 +394,55 @@ def test_supervisor_tools_runs_parallel_research_and_enforces_cap(monkeypatch):
     )
     state = {
         "supervisor_messages": [latest_ai],
-        "notes": [],
-        "raw_notes": [],
         "research_iterations": 0,
     }
 
-    result = asyncio.run(graph.supervisor_tools(state))
+    result = asyncio.run(supervisor_subgraph.supervisor_prepare(state))
 
-    assert result["research_iterations"] == 1
-    assert result["notes"]
-    assert result["raw_notes"]
-    assert any("finding [1]" in note for note in result["notes"])
+    assert result["pending_requested_research_units"] == 2
+    assert result["pending_dispatched_research_units"] == 1
+    assert result["pending_skipped_research_units"] == 1
+    assert len(result["pending_research_calls"]) == 1
     assert any("skipped" in message.content for message in result["supervisor_messages"])
-    runtime_progress = result["runtime_progress"]
-    assert runtime_progress["requested_research_units"] == 2
-    assert runtime_progress["dispatched_research_units"] == 1
-    assert runtime_progress["skipped_research_units"] == 1
-    assert runtime_progress["quality_gate_status"] == "none"
+
+
+def test_supervisor_run_research_unit_extracts_notes_and_evidence(monkeypatch):
+    supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
+    researcher_graph = SimpleNamespace(
+        ainvoke=AsyncMock(
+            return_value={
+                "messages": [
+                    AIMessage(content="compressed finding [1]\\n\\nSources:\\n[1] https://example.com/source"),
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(supervisor_subgraph, "build_researcher_subgraph", lambda: researcher_graph)
+
+    result = asyncio.run(
+        supervisor_subgraph.run_research_unit(
+            {"research_call": {"id": "call-1", "args": {"research_topic": "Topic A"}, "topic": "Topic A"}}
+        )
+    )
+
+    assert result["notes"]
+    assert any("finding [1]" in note for note in result["notes"])
+    assert result["evidence_ledger"]
     assert researcher_graph.ainvoke.await_count == 1
 
 
-def test_supervisor_tools_marks_completion_when_research_complete_called(monkeypatch):
-    graph = _load_graph_module()
+def test_supervisor_finalize_marks_completion_when_research_complete_called(monkeypatch):
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
     monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 6)
 
-    latest_ai = AIMessage(
-        content="",
-        tool_calls=[
-            {"id": "complete-1", "name": "ResearchComplete", "args": {}},
-        ],
-    )
     state = {
-        "supervisor_messages": [latest_ai],
-        "notes": [],
-        "raw_notes": [],
+        "pending_complete_calls": [{"id": "complete-1"}],
+        "pending_requested_research_units": 0,
+        "pending_dispatched_research_units": 0,
+        "pending_skipped_research_units": 0,
+        "pending_remaining_iterations": 4,
+        "research_unit_summaries": [],
+        "research_unit_summaries_consumed": 0,
         "evidence_ledger": [
             {
                 "claim": "Claim one [1].",
@@ -599,13 +460,9 @@ def test_supervisor_tools_marks_completion_when_research_complete_called(monkeyp
         "research_iterations": 2,
     }
 
-    result = asyncio.run(graph.supervisor_tools(state))
+    result = asyncio.run(supervisor_subgraph.supervisor_finalize(state))
     assert result["research_iterations"] == 6
     assert any("ResearchComplete received" in msg.content for msg in result["supervisor_messages"])
-    runtime_progress = result["runtime_progress"]
-    assert runtime_progress["quality_gate_status"] == "pass"
-    assert runtime_progress["evidence_record_count"] == 2
-    assert runtime_progress["source_domain_count"] == 2
 
 
 def test_final_report_generation_uses_model_output(monkeypatch):
@@ -658,7 +515,6 @@ def test_final_report_generation_retries_on_token_limit_then_succeeds(monkeypatc
 
 
 def test_app_proceed_flow_runs_supervisor_and_final_report(monkeypatch):
-    graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
@@ -675,18 +531,17 @@ def test_app_proceed_flow_runs_supervisor_and_final_report(monkeypatch):
         },
         freeform_responses=[AIMessage(content="Final synthesized answer [1].")],
     )
-    supervisor_graph = SimpleNamespace(
-        ainvoke=AsyncMock(
-            return_value={
-                "supervisor_messages": [HumanMessage(content="Research brief for test.")],
-                "notes": ["supervisor note [1]"],
-                "raw_notes": ["raw note [1]"],
-            }
-        )
+    supervisor_graph = AsyncMock(
+        return_value={
+            "supervisor_messages": [HumanMessage(content="Research brief for test.")],
+            "notes": ["supervisor note [1]"],
+            "raw_notes": ["raw note [1]"],
+        }
     )
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
     monkeypatch.setattr(supervisor_subgraph, "build_supervisor_subgraph", lambda: supervisor_graph)
+    graph = _load_graph_module()
 
     result = asyncio.run(
         graph.app.ainvoke(
@@ -699,7 +554,7 @@ def test_app_proceed_flow_runs_supervisor_and_final_report(monkeypatch):
     assert result["awaiting_clarification"] is False
     assert "Final synthesized answer [1]." in result["final_report"]
     assert "Sources:" in result["final_report"]
-    assert supervisor_graph.ainvoke.await_count == 1
+    assert supervisor_graph.await_count == 1
 
 
 def test_research_handoff_update_resets_accumulated_supervisor_and_note_state():

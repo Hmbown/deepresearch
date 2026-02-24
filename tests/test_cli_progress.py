@@ -66,42 +66,38 @@ def test_progress_display_summarizes_recursion_limit_without_raw_error_url():
     display.handle_event(
         {
             "event": "on_chain_start",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
+            "name": "supervisor_prepare",
+            "metadata": {"checkpoint_ns": "research_supervisor|supervisor_prepare"},
             "data": {"input": {}},
         }
     )
 
     display.handle_event(
         {
-            "event": "on_chain_end",
-            "name": "supervisor_tools",
-            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
+            "event": "on_custom_event",
+            "name": "supervisor_progress",
+            "metadata": {"checkpoint_ns": "research_supervisor|supervisor_finalize"},
             "data": {
-                "output": {
-                    "runtime_progress": {
-                        "supervisor_iteration": 1,
-                        "requested_research_units": 1,
-                        "dispatched_research_units": 1,
-                        "skipped_research_units": 0,
-                        "remaining_iterations": 15,
-                        "max_concurrent_research_units": 6,
-                        "max_researcher_iterations": 16,
-                        "quality_gate_status": "none",
-                        "quality_gate_reason": "",
-                        "evidence_record_count": 0,
-                        "source_domain_count": 0,
-                        "source_domains": [],
-                        "research_units": [
-                            {
-                                "topic": "Counter-UAS integration updates",
-                                "status": "failed",
-                                "failure_reason": "Recursion limit of 41 reached",
-                                "duration_seconds": 2.1,
-                            }
-                        ],
+                "supervisor_iteration": 1,
+                "requested_research_units": 1,
+                "dispatched_research_units": 1,
+                "skipped_research_units": 0,
+                "remaining_iterations": 15,
+                "max_concurrent_research_units": 6,
+                "max_researcher_iterations": 16,
+                "quality_gate_status": "none",
+                "quality_gate_reason": "",
+                "evidence_record_count": 0,
+                "source_domain_count": 0,
+                "source_domains": [],
+                "research_units": [
+                    {
+                        "topic": "Counter-UAS integration updates",
+                        "status": "failed",
+                        "failure_reason": "Recursion limit of 41 reached",
+                        "duration_seconds": 2.1,
                     }
-                }
+                ],
             },
         }
     )

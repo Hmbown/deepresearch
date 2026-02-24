@@ -6,7 +6,6 @@ def test_no_legacy_graph_patterns_in_source():
     forbidden_tokens = [
         "IntakeFirstApp",
         "@entrypoint",
-        "Send(",
         "evaluate_wave",
         "classify_and_plan",
         "WAVE_EVALUATION_PROMPT",
@@ -16,6 +15,13 @@ def test_no_legacy_graph_patterns_in_source():
         text = path.read_text(encoding="utf-8")
         for token in forbidden_tokens:
             assert token not in text, f"Found legacy token '{token}' in {path}"
+
+
+def test_supervisor_subgraph_uses_send_dispatch():
+    """Ensure native fan-out stays on LangGraph Send."""
+    path = Path("src/deepresearch/supervisor_subgraph.py")
+    text = path.read_text(encoding="utf-8")
+    assert "Send(" in text, "Supervisor subgraph should use LangGraph Send for parallel dispatch"
 
 
 def test_no_machine_specific_paths_in_source_and_docs():
