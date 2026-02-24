@@ -13,7 +13,6 @@ from ..config import (
     get_max_concurrent_research_units,
     get_max_react_tool_calls,
     get_max_researcher_iterations,
-    get_researcher_search_budget,
 )
 from .prompts import ANSWER_QUALITY_PROMPT, PROCESS_QUALITY_PROMPT
 
@@ -203,7 +202,6 @@ def _build_process_summary(child_runs: list[Any]) -> str:
     domains_str = ", ".join(sorted_domains[:20]) if sorted_domains else "(none)"
     config_lines = (
         f"- Runtime config: max_react_tool_calls={get_max_react_tool_calls()}, "
-        f"search_budget={get_researcher_search_budget()}, "
         f"max_concurrent_research_units={get_max_concurrent_research_units()}, "
         f"max_researcher_iterations={get_max_researcher_iterations()}\n"
         f"- Observed child run names: {', '.join(sorted(observed_names)) or '(none)'}\n"

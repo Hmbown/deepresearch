@@ -288,6 +288,50 @@ Optional LLM-as-judge framework:
 
 ## Changelog
 
+### 2026-02-24 — Simplification sweep 2: remove residual artificial limits
+
+**Problem:** Several remaining knobs and schema fields were adding complexity while either never being used at runtime or reducing research quality by truncating useful context.
+
+**What changed:**
+
+1. **Evidence schema trimmed to URL-only** (`state.py`, `researcher_subgraph.py`):
+   - `EvidenceRecord` now contains only `source_urls`.
+   - Removed dead fields: `claim`, `confidence`, `contradiction_or_uncertainty`.
+   - URL extraction still emits one record per unique URL.
+
+2. **Search relevance ordering preserved** (`nodes.py`):
+   - Search preprocessing is `normalize -> dedupe -> sort -> truncate -> format`.
+   - Deterministic ordering is retained via `_sort_search_results()` after dedupe.
+
+3. **Supervisor note compression no longer truncates content** (`state.py`, `config.py`):
+   - `compress_note_text()` keeps whitespace normalization + deduplication + bullet formatting.
+   - Removed bullet-count and word-budget truncation.
+   - Removed config knobs: `SUPERVISOR_NOTES_MAX_BULLETS`, `SUPERVISOR_NOTES_WORD_BUDGET`.
+
+4. **Larger fetch payloads for source pages** (`nodes.py`):
+   - `fetch_url` truncation cap raised from 8000 to 20000 characters.
+
+5. **More search results per Exa call** (`nodes.py`):
+   - Exa `num_results` increased from 5 to 10.
+
+6. **Prompt simplifications** (`prompts.py`):
+   - Removed hardcoded “3-5 waves” anchoring from supervisor guidance.
+   - Removed `researcher_search_budget` placeholder/instruction from researcher prompt.
+   - Removed `final_report_max_sections` placeholder/instruction from final report prompt.
+
+7. **Removed soft/redundant config knobs** (`config.py`, `researcher_subgraph.py`, `report.py`, `.env.example`, `evals/evaluators.py`):
+   - Removed:
+     - `RESEARCHER_SEARCH_BUDGET` (+ getter/default)
+     - `SUPERVISOR_FINAL_REPORT_MAX_SECTIONS` (+ getter/default)
+   - `MAX_REACT_TOOL_CALLS` remains the hard researcher tool-call control.
+   - Eval process summary no longer reports the removed `search_budget`.
+
+8. **Tests updated to match cutover contracts**:
+   - Evidence fixtures now use URL-only records.
+   - Prompt contract tests updated for removed placeholders.
+   - Config tests updated for removed knobs.
+   - Fetch truncation test updated for the 20k cap.
+
 ### 2026-02-24 — Depth unlocking, prompt rewrite, plan checkpoint
 
 **Problem:** The system was silently killing deep research runs. Users saw "hit tool call limit (41 steps)" after ~2 waves because internal defaults were set too conservatively. Output was thin — far fewer sources and citations than comparable systems.
@@ -402,3 +446,62 @@ Two new env-configurable knobs added to `config.py`:
 **Remaining risks / next steps:**
 - Prompt changes are soft guidance — the model may still under-ask or over-track depending on the query. Need to observe behavior on a few real runs.
 - No hard enforcement that track count <= `MAX_CONCURRENT_RESEARCH_UNITS` — it's prompt-level only. Could add a Python-side truncation in `_format_plan_message` if the model ignores the cap.
+
+### 2026-02-24 — Simplify evidence system: remove quality gate, URL-only extraction
+
+**Problem:** Live runs showed the evidence system adding complexity without improving quality:
+
+- Quality gate was trivially passed (4 researchers x 5 claims = 20 records per wave, gate requires only 5).
+- Regex-based claim extraction (`_extract_claim_lines`) was brittle and produced noisy results.
+- No cross-researcher URL deduplication — `evidence_ledger` grew via `operator.add` with pure concatenation.
+- CLI displayed "evidence records" which confused users who saw 150+ records and thought something was wrong.
+- The reference implementation uses no quality gate or claim extraction — just LLM compression + iteration limits + supervisor judgment.
+
+User directive: "go for the most simple and working method that we know can work."
+
+**What changed:**
+
+1. **Quality gate removed** (`supervisor_subgraph.py`): Deleted `_evaluate_research_complete_gate()`, `_MIN_EVIDENCE_RECORDS_FOR_COMPLETION`, `_MIN_SOURCE_DOMAINS_FOR_COMPLETION`. `ResearchComplete` always succeeds now. The supervisor's own judgment (informed by the prompt telling it to iterate 3-5 waves) controls when to stop.
+
+2. **Evidence extraction simplified** (`researcher_subgraph.py`): Replaced `_extract_evidence_records()` (claim parsing, citation resolution, uncertainty detection) with a simple URL-only extractor. One `EvidenceRecord` per unique URL with `claim=""`, `source_urls=[url]`, `confidence=0.5`. Deleted `_extract_claim_lines`, `_extract_citation_url_map`, and all associated regex patterns.
+
+3. **URL-level deduplication added** (`supervisor_subgraph.py`): In `supervisor_finalize()`, before emitting the progress payload, evidence records are deduplicated by URL across all researchers. This prevents the same source being counted multiple times.
+
+4. **Dead config knobs removed** (`config.py`): Deleted `DEFAULT_MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT`, `DEFAULT_MAX_SOURCE_URLS_PER_CLAIM`, and their getter functions. Removed from `.env.example`.
+
+5. **CLI display updated** (`cli.py`): All "evidence records" labels changed to "sources". Quality gate display removed entirely. Evidence dedup key simplified to URL-only.
+
+**Architecture:** `EvidenceRecord` model preserved (claim, source_urls, confidence, contradiction_or_uncertainty) so `report.py` and `cli.py` keep working. The `claim` field is now always empty string; `source_urls` always has exactly one URL per record. This is a data simplification, not a schema change.
+
+**Test results:** 173 passed, 1 skipped. Import verified. All existing tests updated to match new behavior.
+
+**Deployment status:** Committed to `main`.
+
+### 2026-02-24 — Fix context overflows: only pass synthesized track writeups downstream
+
+**Problem:** Real runs hit `OpenAIAPIContextOverflowError` in both the supervisor planner and final report generation.
+
+Root causes:
+- We were folding **tool outputs** (especially `fetch_url` full-text extracts like SEC filings) into `raw_notes`, then generating notes from that token-heavy blob.
+- The supervisor planner was then re-injecting `notes` and `raw_notes` into a new context block each cycle, duplicating large text on top of already-present tool messages.
+- Final synthesis always included some `raw_notes`, so one large chunk could overflow every attempt.
+
+**What changed (keep quality, remove bloat):**
+1. **Research extraction now uses only the researcher's final AI write-up** (`researcher_subgraph.py`):
+   - Notes are derived from the last non-empty AI message content (the structured "Executive Summary / Evidence Log / Sources" write-up).
+   - Tool outputs are no longer included in notes.
+   - If the final write-up contains no URLs, we recover URLs from tool outputs for `evidence_ledger` without retaining the tool bodies.
+
+2. **Supervisor planner no longer appends notes/raw-notes context blocks** (`supervisor_subgraph.py`):
+   - The supervisor already sees per-track findings as `ToolMessage` content. Re-injecting joined notes was redundant and caused runaway prompt growth.
+
+3. **Final report synthesis prefers compressed notes** (`report.py`):
+   - When compressed notes exist, we omit `raw_notes` from the synthesis prompt to avoid token blow-ups.
+   - `raw_notes` are only included if we have no compressed notes at all.
+
+4. **Token-limit detection expanded** (`state.py`):
+   - Treat "context window" errors as token limit errors to trigger the existing deterministic retry path.
+
+**Architecture:** Single canonical runtime path preserved. No new pipelines, flags, or report-to-disk behavior.
+
+**Test results:** 173 passed, 1 skipped.

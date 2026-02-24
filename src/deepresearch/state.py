@@ -13,7 +13,6 @@ from langgraph.graph import MessagesState
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, ValidationError
 
-from .config import get_supervisor_notes_max_bullets, get_supervisor_notes_word_budget
 from .message_utils import extract_text_content
 
 FALLBACK_CLARIFY_QUESTION = (
@@ -274,20 +273,9 @@ class ResearchComplete(BaseModel):
 class EvidenceRecord(BaseModel):
     """Structured evidence item extracted from researcher output."""
 
-    claim: str = Field(description="Atomic factual claim or finding text.")
     source_urls: list[str] = Field(
         default_factory=list,
-        description="Source URLs that support this claim.",
-    )
-    confidence: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Deterministic confidence estimate in [0, 1].",
-    )
-    contradiction_or_uncertainty: str | None = Field(
-        default=None,
-        description="Contradiction or uncertainty note, if present.",
+        description="Source URLs extracted from researcher output.",
     )
 
 
@@ -502,6 +490,7 @@ def is_token_limit_error(exc: Exception) -> bool:
     message = str(exc).lower()
     token_markers = (
         "context length",
+        "context window",
         "maximum context",
         "too many tokens",
         "token limit",
@@ -542,9 +531,6 @@ def compress_note_text(raw_text: str | None) -> str | None:
     if not text:
         return None
 
-    max_bullets = get_supervisor_notes_max_bullets()
-    word_budget = get_supervisor_notes_word_budget()
-
     candidates: list[str] = []
     seen: set[str] = set()
     for block in re.split(r"\n\n+", text):
@@ -556,14 +542,8 @@ def compress_note_text(raw_text: str | None) -> str | None:
             continue
         seen.add(dedupe_key)
         candidates.append(normalized)
-        if len(candidates) >= max_bullets:
-            break
 
     if not candidates:
         return None
 
-    compressed = "\n".join(f"- {item}" for item in candidates)
-    words = compressed.split()
-    if len(words) > word_budget:
-        compressed = " ".join(words[:word_budget]).strip() + " ..."
-    return compressed.strip()
+    return "\n".join(f"- {item}" for item in candidates).strip()

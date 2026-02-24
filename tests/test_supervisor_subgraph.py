@@ -5,11 +5,13 @@ from langchain_core.messages import AIMessage
 from langgraph.types import Send
 
 from deepresearch import supervisor_subgraph
-from deepresearch.state import FALLBACK_SUPERVISOR_NO_USEFUL_RESEARCH
+from deepresearch.state import FALLBACK_SUPERVISOR_NO_USEFUL_RESEARCH, today_utc_date
+
+TEST_DATE = today_utc_date()
 
 
 def test_render_supervisor_prompt_excludes_downstream_prompt_contracts():
-    rendered = supervisor_subgraph.render_supervisor_prompt(current_date="2026-02-24")
+    rendered = supervisor_subgraph.render_supervisor_prompt(current_date=TEST_DATE)
 
     assert "research supervisor" in rendered.lower()
     assert "ConductResearch" in rendered

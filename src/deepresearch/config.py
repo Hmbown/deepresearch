@@ -15,15 +15,9 @@ DEFAULT_SUBAGENT_MODEL = "openai:gpt-5.2"
 DEFAULT_SEARCH_PROVIDER = "exa"
 SUPPORTED_SEARCH_PROVIDERS = ("exa", "tavily", "none")
 DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES = 3
-DEFAULT_RESEARCHER_SEARCH_BUDGET = 15
 DEFAULT_MAX_REACT_TOOL_CALLS = 40
 DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS = 4
 DEFAULT_MAX_RESEARCHER_ITERATIONS = 60
-DEFAULT_MAX_SOURCE_URLS_PER_CLAIM = 5
-DEFAULT_MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT = 5
-DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS = 40
-DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET = 1200
-DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS = 12
 DEFAULT_ENABLE_RUNTIME_EVENT_LOGS = False
 DEFAULT_EVAL_MODEL = "openai:gpt-4.1-mini"
 DEFAULT_ENABLE_ONLINE_EVALS = False
@@ -64,11 +58,6 @@ def get_max_structured_output_retries() -> int:
     return _resolve_int_env("MAX_STRUCTURED_OUTPUT_RETRIES", DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES, minimum=1)
 
 
-def get_researcher_search_budget() -> int:
-    """Configured soft search-call budget for researcher delegations."""
-    return _resolve_int_env("RESEARCHER_SEARCH_BUDGET", DEFAULT_RESEARCHER_SEARCH_BUDGET, minimum=1)
-
-
 def get_max_react_tool_calls() -> int:
     """Hard cap for researcher ReAct tool calls in one delegation."""
     return _resolve_int_env("MAX_REACT_TOOL_CALLS", DEFAULT_MAX_REACT_TOOL_CALLS, minimum=1)
@@ -86,39 +75,6 @@ def get_max_concurrent_research_units() -> int:
 def get_max_researcher_iterations() -> int:
     """Hard cap for total ConductResearch units dispatched in one supervisor run."""
     return _resolve_int_env("MAX_RESEARCHER_ITERATIONS", DEFAULT_MAX_RESEARCHER_ITERATIONS, minimum=1)
-
-
-def get_max_source_urls_per_claim() -> int:
-    """Configured cap for source URLs retained per extracted evidence claim."""
-    return _resolve_int_env("MAX_SOURCE_URLS_PER_CLAIM", DEFAULT_MAX_SOURCE_URLS_PER_CLAIM, minimum=1)
-
-
-def get_max_evidence_claims_per_research_unit() -> int:
-    """Configured cap for evidence claims extracted from one researcher result."""
-    return _resolve_int_env(
-        "MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT",
-        DEFAULT_MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT,
-        minimum=1,
-    )
-
-
-def get_supervisor_notes_max_bullets() -> int:
-    """Configured cap for compressed supervisor note bullets."""
-    return _resolve_int_env("SUPERVISOR_NOTES_MAX_BULLETS", DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS, minimum=1)
-
-
-def get_supervisor_notes_word_budget() -> int:
-    """Configured cap for compressed supervisor note word budget."""
-    return _resolve_int_env("SUPERVISOR_NOTES_WORD_BUDGET", DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET, minimum=50)
-
-
-def get_supervisor_final_report_max_sections() -> int:
-    """Configured maximum section count hint for final report drafting."""
-    return _resolve_int_env(
-        "SUPERVISOR_FINAL_REPORT_MAX_SECTIONS",
-        DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS,
-        minimum=1,
-    )
 
 
 def _resolve_model_for_role(role: str) -> str:
