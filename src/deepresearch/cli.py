@@ -949,9 +949,15 @@ def run_setup_wizard() -> int:
 
 async def run_session(thread_id: str, *, quiet: bool = False, verbose: bool = False) -> None:
     """Run an interactive multi-turn session on a single thread."""
+    from langgraph.checkpoint.memory import MemorySaver
+    from .graph import build_app
+
+    ensure_runtime_env_ready()
+    app = build_app(checkpointer=MemorySaver())
+    config = _thread_config(thread_id)
+
     print(f"Session thread_id: {thread_id}")
     print("Type 'exit' or 'quit' to end the session.")
-    prior_messages: list[Any] = []
     while True:
         query = input("\nYou: ").strip()
         if not query:
@@ -959,14 +965,8 @@ async def run_session(thread_id: str, *, quiet: bool = False, verbose: bool = Fa
         if query.lower() in {"exit", "quit", ":q", "/exit"}:
             return
 
-        result = await run(
-            query,
-            thread_id=thread_id,
-            prior_messages=prior_messages,
-            quiet=quiet,
-            verbose=verbose,
-        )
-        prior_messages = list(result.get("messages", prior_messages))
+        payload = {"messages": [HumanMessage(content=query)]}
+        result = await _run_with_progress(app, payload, config, verbose=verbose, quiet=quiet)
         print_results(result)
 
 
