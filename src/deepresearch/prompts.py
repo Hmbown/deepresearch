@@ -104,7 +104,7 @@ How to work:
 
 2. **Run in parallel.** If tracks are independent, send them all at once. You can dispatch up to {max_concurrent_research_units} researchers at a time. Total budget is {max_researcher_iterations} research units for the whole run — that's plenty, so don't be stingy.
 
-3. **Review and iterate.** After each wave comes back, actually read the findings. Ask yourself: Are there gaps? Contradictions? Claims with only one source? If so, send another wave targeting those gaps. A thorough research run usually takes 3-5 waves. Don't stop after one wave unless the topic is genuinely simple.
+3. **Review and iterate.** After each wave comes back, actually read the findings. Ask yourself: Are there gaps? Contradictions? Claims with only one source? If so, send another wave targeting those gaps. Don't stop after one wave unless the topic is genuinely simple.
 
 4. **Finish when it's solid.** Call ResearchComplete when you have strong evidence across the key claims, multiple independent sources, and you've investigated any contradictions. The downstream report generator needs evidence that supports inline citations [1], [2] with real URLs.
 
@@ -127,7 +127,7 @@ Your tools:
 
 How to work:
 1. Search first, think second. After each search, use think_tool to assess what you found before searching again.
-2. You have {researcher_search_budget} search calls and {max_react_tool_calls} total tool calls — that's plenty. Use what you need to build strong evidence. Don't cut corners.
+2. You have up to {max_react_tool_calls} total tool calls — that's plenty. Use what you need to build strong evidence. Don't cut corners.
 3. Keep searching until you can answer confidently with well-sourced claims, or your last couple searches aren't turning up new information.
 4. Only use fetch_url when a snippet isn't enough — like when you need exact numbers, quotes, methods, or definitions.
 5. Try to get 2+ independent sources for major claims. For broad topics, aim for 3+ different source domains.
@@ -184,14 +184,21 @@ FINAL_REPORT_PROMPT = """\
 You are writing the final research report. You have compressed notes and raw notes from multiple research tracks — \
 synthesize them into a clear, well-cited report that directly answers the user's question.
 
-Today is {current_date}. Use at most {final_report_max_sections} sections unless the user asked for a specific structure.
+Today is {current_date}.
 
 Write in the same language as the user. Be direct and substantive — this is the deliverable they're waiting for.
 
 Citations are critical:
-- Use inline citations [1], [2], ... for every factual claim throughout the report.
-- End with a Sources section mapping each citation number to its URL.
+- Cite only factual claims about the world. Do not cite report meta text (objective, disclaimers, or methodology notes).
+- Use inline citations [1], [2], ... for factual claims throughout the report.
+- End with a Sources section mapping each citation number to its full URL.
+- Prefer SEC-hosted filing URLs for SEC-based claims.
+- Do not use generic SEC EDGAR search pages or USCourts pages as citations for issuer-specific facts.
+- Ensure every URL is complete and not truncated; omit uncertain links.
 - Draw from multiple independent sources. Don't lean on a single domain.
+
+Time anchoring:
+- When stating key metrics (cash, runway, debt maturities, liquidity), include an "as of" date and the filing period/date from the cited source.
 
 Be honest about uncertainty:
 - If a claim has only one source, note that.

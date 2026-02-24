@@ -1,6 +1,9 @@
 from deepresearch import prompts
+from deepresearch.state import today_utc_date
 
 import pytest
+
+TEST_DATE = today_utc_date()
 
 
 def test_clarify_prompt_includes_multi_turn_instruction():
@@ -51,7 +54,6 @@ def test_researcher_prompt_preserves_research_quality_contract():
         "think_tool",
         "Contradictions/Uncertainties",
         "citation",
-        "researcher_search_budget",
         "max_react_tool_calls",
         "same language",
     ]
@@ -61,39 +63,50 @@ def test_researcher_prompt_preserves_research_quality_contract():
 
 def test_final_report_prompt_has_required_placeholders():
     assert "{current_date}" in prompts.FINAL_REPORT_PROMPT
-    assert "{final_report_max_sections}" in prompts.FINAL_REPORT_PROMPT
+
+
+def test_final_report_prompt_enforces_citation_and_url_quality_rules():
+    required_tokens = [
+        "Cite only factual claims about the world",
+        "Prefer SEC-hosted filing URLs",
+        "generic SEC EDGAR search pages",
+        "USCourts pages",
+        "complete and not truncated",
+        'include an "as of" date',
+    ]
+    for token in required_tokens:
+        assert token in prompts.FINAL_REPORT_PROMPT
 
 
 def test_research_plan_prompt_has_required_placeholders():
     assert "{research_brief}" in prompts.RESEARCH_PLAN_PROMPT
     assert "{date}" in prompts.RESEARCH_PLAN_PROMPT
     assert "{max_research_tracks}" in prompts.RESEARCH_PLAN_PROMPT
-    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date="2026-02-24", max_research_tracks=4)
+    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date=TEST_DATE, max_research_tracks=4)
 
 
 def test_prompt_templates_render_with_expected_keys_and_fail_closed_on_missing_fields():
-    assert prompts.CLARIFY_PROMPT.format(messages="m", date="2026-02-23")
-    assert prompts.RESEARCH_BRIEF_PROMPT.format(messages="m", date="2026-02-23")
+    assert prompts.CLARIFY_PROMPT.format(messages="m", date=TEST_DATE)
+    assert prompts.RESEARCH_BRIEF_PROMPT.format(messages="m", date=TEST_DATE)
     assert prompts.SUPERVISOR_PROMPT.format(
-        current_date="2026-02-23",
+        current_date=TEST_DATE,
         max_concurrent_research_units=4,
         max_researcher_iterations=6,
     )
     assert prompts.RESEARCHER_PROMPT.format(
-        researcher_search_budget=8,
         max_react_tool_calls=10,
     )
-    assert prompts.FINAL_REPORT_PROMPT.format(current_date="2026-02-23", final_report_max_sections=8)
-    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date="2026-02-24", max_research_tracks=4)
+    assert prompts.FINAL_REPORT_PROMPT.format(current_date=TEST_DATE)
+    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date=TEST_DATE, max_research_tracks=4)
 
     with pytest.raises(KeyError):
         prompts.CLARIFY_PROMPT.format(messages="m")
     with pytest.raises(KeyError):
         prompts.RESEARCH_BRIEF_PROMPT.format(messages="m")
     with pytest.raises(KeyError):
-        prompts.SUPERVISOR_PROMPT.format(current_date="2026-02-23")
+        prompts.SUPERVISOR_PROMPT.format(current_date=TEST_DATE)
     with pytest.raises(KeyError):
-        prompts.RESEARCHER_PROMPT.format(researcher_search_budget=8)
+        prompts.RESEARCHER_PROMPT.format()
 
 
 def test_researcher_prompt_sections_are_explicit_and_ordered():
