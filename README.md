@@ -2,6 +2,8 @@
 
 LangGraph multi-agent system that clarifies scope when needed, runs focused web research in parallel, and synthesizes a cited answer. One canonical runtime path: `scope_intake -> research_supervisor -> final_report_generation`.
 
+![Architecture Graph](docs/architecture.png)
+
 ## Prerequisites
 
 - Python 3.11+
