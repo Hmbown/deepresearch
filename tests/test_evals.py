@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import types
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from deepresearch import cli, config
 from deepresearch.evals.evaluators import (

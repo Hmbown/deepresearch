@@ -1,7 +1,6 @@
 import asyncio
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langchain_core.tools import tool
 
 from deepresearch import researcher_subgraph
 from deepresearch.researcher_subgraph import extract_research_from_messages

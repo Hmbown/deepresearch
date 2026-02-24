@@ -70,14 +70,23 @@ Keep and preserve:
   - `tests/test_architecture_guardrails.py` blocks legacy graph tokens and machine-specific path leakage.
 - This is the canonical implementation rule until a concrete request justifies expansion.
 
+## Current Baseline (Updated 2026-02-23)
+
+- Researcher runtime is deep-agent-backed (`src/deepresearch/researcher_subgraph.py` via `create_deep_agent`).
+- Online eval framework is implemented (`src/deepresearch/evals/*`, `scripts/run_online_evals.py`).
+- Online eval operations run manually via workflow dispatch (`.github/workflows/online-evals.yml`) or direct script execution.
+- Canonical runtime path remains `route_turn -> clarify_with_user -> write_research_brief -> research_supervisor -> final_report_generation`.
+
 ## Deferred Work (Issues 752, 753)
 
-- SHA-753 — quality/evaluation harness
-  - Decision: defer.
-  - Design note: keep current prompt-driven regression checks; postpone benchmarking/evaluator harness to a dedicated performance track.
-  - Next steps (when explicitly resumed): add a small prompt-quality fixture set and a parallelism regression dataset.
-  - Effort estimate: 8–16h.
-  - Risk: medium-high (maintainable evaluation fixture drift + benchmark cost).
+- SHA-752 — hard delegation cap enforcement for deepagents runtime
+  - Status: deferred design investigation.
+  - Pending output: short design note on extension points, deterministic overflow handling, and complexity/risk.
+
+- SHA-753 — expanded quality/parallelism evaluation harness
+  - Status: partially implemented, broader harness still deferred.
+  - Implemented: online LLM-as-judge evaluators, callback integration, and batch runner.
+  - Remaining deferred scope: curated fixture dataset, regression suite, and cost-envelope governance.
 
 ## Implementation Expectations
 

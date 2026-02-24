@@ -1,0 +1,93 @@
+name: online-evals
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "LangSmith project name (defaults to vars or deepresearch-local)"
+        required: false
+        default: ""
+      since:
+        description: "Time window (24h, 7d, 1w)"
+        required: false
+        default: "24h"
+      limit:
+        description: "Max root runs to evaluate"
+        required: false
+        default: "50"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: online-evals
+  cancel-in-progress: false
+
+jobs:
+  run-online-evals:
+    if: ${{ secrets.LANGSMITH_API_KEY != '' && secrets.OPENAI_API_KEY != '' }}
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+      LANGSMITH_ENDPOINT: ${{ secrets.LANGSMITH_ENDPOINT }}
+      LANGCHAIN_ENDPOINT: ${{ secrets.LANGCHAIN_ENDPOINT }}
+      LANGSMITH_PROJECT: ${{ vars.LANGSMITH_PROJECT }}
+      LANGCHAIN_PROJECT: ${{ vars.LANGCHAIN_PROJECT }}
+      EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run online eval batch
+        run: |
+          set -eo pipefail
+          PROJECT_INPUT="${{ github.event.inputs.project }}"
+          SINCE_INPUT="${{ github.event.inputs.since }}"
+          LIMIT_INPUT="${{ github.event.inputs.limit }}"
+
+          PROJECT="${PROJECT_INPUT:-${LANGSMITH_PROJECT:-${LANGCHAIN_PROJECT:-deepresearch-local}}}"
+          SINCE="${SINCE_INPUT:-24h}"
+          LIMIT="${LIMIT_INPUT:-50}"
+
+          echo "Running online evals: project=${PROJECT} since=${SINCE} limit=${LIMIT}"
+          python scripts/run_online_evals.py --project "$PROJECT" --since "$SINCE" --limit "$LIMIT" | tee online-evals.log
+
+      - name: Publish workflow summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Online eval output"
+            echo
+            echo '```text'
+            cat online-evals.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload eval log artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: online-evals-log
+          path: online-evals.log
+          if-no-files-found: error
+
+  online-evals-skipped:
+    if: ${{ secrets.LANGSMITH_API_KEY == '' || secrets.OPENAI_API_KEY == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain skipped run
+        run: |
+          echo "Skipping online eval workflow. Set LANGSMITH_API_KEY and OPENAI_API_KEY secrets to enable."

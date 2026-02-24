@@ -1,16 +1,13 @@
-You are an independent senior reviewer auditing a major runtime cutover in this repository.
+You are an independent senior reviewer auditing current runtime hardening work in this repository.
 
 Repository: `deepresearch`
-Primary goal: validate SHA-758 through SHA-764 end-to-end.
+Primary goal: validate SHA-765 through SHA-768 end-to-end.
 
 Context:
-- This codebase replaced a `deepagents` runtime with a native LangGraph multi-agent architecture.
-- Cutover scope includes state schemas, prompts, researcher/supervisor subgraphs, main-graph wiring, CLI behavior, and runtime verification.
-- This project currently prioritizes a single canonical runtime path (no dual pipelines).
-- Current expected runtime defaults:
-  - `ORCHESTRATOR_MODEL=openai:gpt-5.2`
-  - `SUBAGENT_MODEL=openai:gpt-5.2`
-  - Exa search provider in runtime.
+- Researcher execution is currently deep-agent-backed (`create_deep_agent` in `src/deepresearch/researcher_subgraph.py`).
+- The canonical runtime path remains `route_turn -> clarify_with_user -> write_research_brief -> research_supervisor -> final_report_generation`.
+- Online eval tooling exists in `src/deepresearch/evals/*` and `scripts/run_online_evals.py`.
+- Contributor guidance should match implemented runtime behavior and deferred scope.
 
 Review mode:
 - Use a strict code-review mindset.
@@ -19,63 +16,43 @@ Review mode:
 - Keep summaries brief and secondary.
 
 Required files to inspect:
-- `src/deepresearch/graph.py`
-- `src/deepresearch/prompts.py`
-- `src/deepresearch/config.py`
-- `src/deepresearch/cli.py`
 - `pyproject.toml`
-- `langgraph.json`
+- `.github/workflows/test.yml`
+- `.github/workflows/online-evals.yml`
+- `src/deepresearch/researcher_subgraph.py`
+- `src/deepresearch/evals/evaluators.py`
+- `scripts/run_online_evals.py`
+- `tests/test_evals.py`
 - `tests/test_graph_native_subgraphs.py`
-- `tests/test_intake_scope_phase.py`
-- `tests/test_prompts_contract.py`
-- `tests/test_config_and_cli.py`
-- `tests/test_architecture_guardrails.py`
+- `tests/test_researcher_subgraph_integration.py`
+- `agents.md`
 
 Acceptance criteria to validate:
-1. SHA-758 (deepagents removal + native LangGraph)
-- Zero runtime references to `deepagents`, `create_deep_agent`, `FilesystemBackend`.
-- Main runtime uses native subgraph composition.
-- Single canonical path preserved.
+1. SHA-765 (restore Ruff gate)
+- `ruff check .` is green.
+- The known unused-import violations are removed without behavior changes.
 
-2. SHA-759 (state schemas + structured outputs)
-- `ConductResearch` and `ResearchComplete` models exist and are used as supervisor tools.
-- Researcher/supervisor/main states align with intended reducers and state flow.
+2. SHA-766 (resolve yanked deepagents pin)
+- `pyproject.toml` no longer pins a yanked deepagents version.
+- Clean install path has no yanked warning for selected deepagents pin.
+- Tests stay green after the dependency decision.
 
-3. SHA-760 (prompts)
-- Prompts are native to new architecture (no `write_todos`, `task()`, deepagents concepts).
-- Includes supervisor, researcher, compression, and final-report prompts.
-- Clarify/brief prompts remain intact.
+3. SHA-767 (operationalize online eval harness)
+- A standard automation entrypoint exists via GitHub Actions manual dispatch.
+- Workflow accepts project/since/limit inputs.
+- Workflow logs include a usable score summary and handles no-runs/no-traces gracefully.
 
-4. SHA-761 (researcher subgraph)
-- Researcher loop exists and compiles.
-- Tool calls execute in parallel (`asyncio.gather`).
-- Iteration cap enforced.
-- Compression step returns compressed + raw notes.
-
-5. SHA-762 (supervisor subgraph)
-- Supervisor delegates via structured tool calls.
-- Parallel researcher dispatch works and concurrency caps are enforced.
-- Iteration cap and exit conditions are implemented.
-
-6. SHA-763 (main graph wiring + cleanup)
-- Main graph route is: `write_research_brief -> research_supervisor -> final_report_generation -> END`.
-- No legacy manager/deepagents node path remains.
-- CLI prefers `final_report` fallbacking to last AI message.
-- `deepagents` dependency removed from `pyproject.toml`.
-
-7. SHA-764 (verification)
-- Tests pass.
-- CLI clarification and response flows work.
-- `langgraph dev` starts for Studio.
-- Note any environment blockers (for example LangSmith auth).
+4. SHA-768 (reconcile stale deferred docs/issues)
+- Repository guidance reflects current deep-agent + online-eval implementation.
+- Deferred items for SHA-752/SHA-753 reflect current scope (implemented vs remaining work).
+- No contradictory architecture claims remain in contributor guidance.
 
 Commands to run:
-1. `.venv/bin/python -m pytest -q`
-2. `rg -n "deepagents|create_deep_agent|FilesystemBackend|research_manager_node|build_research_manager|_get_research_manager" src tests pyproject.toml`
-3. `.venv/bin/python -m deepresearch.cli "Compare the best options"`
-4. `MAX_RESEARCHER_ITERATIONS=1 MAX_CONCURRENT_RESEARCH_UNITS=1 MAX_REACT_TOOL_CALLS=1 RESEARCHER_SIMPLE_SEARCH_BUDGET=1 RESEARCHER_COMPLEX_SEARCH_BUDGET=1 .venv/bin/python -m deepresearch.cli "What is retrieval-augmented generation?"`
-5. `zsh -lc '.venv/bin/langgraph dev --no-browser --port 2030 >/tmp/langgraph_dev_2030.log 2>&1 & pid=$!; sleep 8; curl -sS --max-time 5 http://127.0.0.1:2030/docs | head -n 3; kill $pid >/dev/null 2>&1 || true; wait $pid >/dev/null 2>&1 || true'`
-6. Optional (if LangSmith key is valid): list recent runs for project `deepresearch`.
+1. `.venv/bin/python -m ruff check .`
+2. `.venv/bin/python -m pytest -q`
+3. `.venv/bin/python -m pip index versions deepagents`
+4. `rg -n "deepagents==|create_deep_agent|online_evals|run_online_evals|workflow_dispatch|schedule:" pyproject.toml src scripts .github/workflows tests agents.md`
+5. `.venv/bin/python scripts/run_online_evals.py --help`
 
 Output format (mandatory):
 1. Findings
@@ -86,7 +63,7 @@ Output format (mandatory):
 - Only items that materially affect correctness.
 
 3. Acceptance matrix
-- One line each for SHA-758..SHA-764: `Pass`, `Partial`, or `Fail` with one-sentence justification.
+- One line each for SHA-765..SHA-768: `Pass`, `Partial`, or `Fail` with one-sentence justification.
 
 4. Residual risk
 - Briefly call out what could still fail in production even if tests pass.

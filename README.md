@@ -131,6 +131,22 @@ pip install -e ".[dev]"
 pytest tests/ -q
 ```
 
+## Online Evaluations
+
+The repository includes an online LLM-as-judge eval harness for LangSmith traces.
+
+Run locally:
+
+```bash
+python scripts/run_online_evals.py --project deepresearch-local --since 24h --limit 50
+```
+
+Run in GitHub Actions:
+
+- Use the `online-evals` workflow via manual `workflow_dispatch`.
+- Inputs: `project`, `since`, and `limit`.
+- Output summary is printed directly in workflow logs.
+
 ## License
 
 MIT

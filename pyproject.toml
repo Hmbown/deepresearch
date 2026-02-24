@@ -17,7 +17,7 @@ dependencies = [
     "tavily-python==0.7.21",
     "certifi==2026.1.4",
     "langsmith==0.7.6",
-    "deepagents==0.4.2",
+    "deepagents==0.4.3",
     "trafilatura==2.0.0",
     "beautifulsoup4==4.14.3",
     "openevals==0.1.3",
