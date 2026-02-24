@@ -5,7 +5,7 @@ Provider configuration — LLMs and search tools.
 from __future__ import annotations
 
 import os
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from langchain.chat_models import init_chat_model
 
@@ -15,17 +15,19 @@ DEFAULT_SUBAGENT_MODEL = "openai:gpt-5.2"
 DEFAULT_SEARCH_PROVIDER = "exa"
 SUPPORTED_SEARCH_PROVIDERS = ("exa", "tavily", "none")
 DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES = 3
-DEFAULT_RESEARCHER_SIMPLE_SEARCH_BUDGET = 3
-DEFAULT_RESEARCHER_COMPLEX_SEARCH_BUDGET = 5
-DEFAULT_MAX_REACT_TOOL_CALLS = 6
-DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS = 4
-DEFAULT_MAX_RESEARCHER_ITERATIONS = 6
-DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS = 10
-DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET = 250
-DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS = 8
+DEFAULT_RESEARCHER_SEARCH_BUDGET = 8
+DEFAULT_MAX_REACT_TOOL_CALLS = 20
+DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS = 6
+DEFAULT_MAX_RESEARCHER_ITERATIONS = 16
+DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS = 20
+DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET = 500
+DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS = 12
 DEFAULT_ENABLE_RUNTIME_EVENT_LOGS = False
 DEFAULT_EVAL_MODEL = "openai:gpt-4.1-mini"
 DEFAULT_ENABLE_ONLINE_EVALS = False
+DEFAULT_OPENAI_USE_RESPONSES_API = True
+DEFAULT_OPENAI_USE_PREVIOUS_RESPONSE_ID = False
+DEFAULT_OPENAI_OUTPUT_VERSION = "responses/v1"
 
 
 class SearchProviderConfigError(RuntimeError):
@@ -60,14 +62,9 @@ def get_max_structured_output_retries() -> int:
     return _resolve_int_env("MAX_STRUCTURED_OUTPUT_RETRIES", DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES, minimum=1)
 
 
-def get_researcher_simple_search_budget() -> int:
-    """Configured soft budget for simple researcher search calls."""
-    return _resolve_int_env("RESEARCHER_SIMPLE_SEARCH_BUDGET", DEFAULT_RESEARCHER_SIMPLE_SEARCH_BUDGET, minimum=1)
-
-
-def get_researcher_complex_search_budget() -> int:
-    """Configured soft budget for complex researcher search calls."""
-    return _resolve_int_env("RESEARCHER_COMPLEX_SEARCH_BUDGET", DEFAULT_RESEARCHER_COMPLEX_SEARCH_BUDGET, minimum=1)
+def get_researcher_search_budget() -> int:
+    """Configured soft search-call budget for researcher delegations."""
+    return _resolve_int_env("RESEARCHER_SEARCH_BUDGET", DEFAULT_RESEARCHER_SEARCH_BUDGET, minimum=1)
 
 
 def get_max_react_tool_calls() -> int:
@@ -134,6 +131,25 @@ def runtime_event_logs_enabled() -> bool:
 def online_evals_enabled() -> bool:
     """Return whether online LLM-as-judge evaluations are enabled."""
     return _resolve_bool_env("ENABLE_ONLINE_EVALS", DEFAULT_ENABLE_ONLINE_EVALS)
+
+
+def openai_responses_api_enabled() -> bool:
+    """Return whether OpenAI models should use the Responses API."""
+    return _resolve_bool_env("OPENAI_USE_RESPONSES_API", DEFAULT_OPENAI_USE_RESPONSES_API)
+
+
+def openai_use_previous_response_id_enabled() -> bool:
+    """Return whether OpenAI Responses API should use previous_response_id compaction."""
+    return _resolve_bool_env(
+        "OPENAI_USE_PREVIOUS_RESPONSE_ID",
+        DEFAULT_OPENAI_USE_PREVIOUS_RESPONSE_ID,
+    )
+
+
+def get_openai_output_version() -> str | None:
+    """Return output version for OpenAI chat models, if configured."""
+    output_version = str(os.environ.get("OPENAI_OUTPUT_VERSION", DEFAULT_OPENAI_OUTPUT_VERSION)).strip()
+    return output_version or None
 
 
 def get_eval_model() -> str:
@@ -215,7 +231,22 @@ def get_llm(role: str = "orchestrator"):
     Uses init_chat_model for provider detection (e.g. "openai:gpt-5.2").
     """
     model = _resolve_model_for_role(role)
-    return init_chat_model(model=model)
+    init_kwargs: dict[str, Any] = {"model": model}
+
+    if model.startswith("openai:") and openai_responses_api_enabled():
+        init_kwargs["use_responses_api"] = True
+        output_version = get_openai_output_version()
+        if output_version:
+            init_kwargs["output_version"] = output_version
+        if openai_use_previous_response_id_enabled():
+            init_kwargs["use_previous_response_id"] = True
+
+    try:
+        return init_chat_model(**init_kwargs)
+    except TypeError:
+        if model.startswith("openai:") and "use_responses_api" in init_kwargs:
+            return init_chat_model(model=model)
+        raise
 
 
 def get_search_tool():

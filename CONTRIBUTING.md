@@ -5,7 +5,7 @@
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"
 [ -f .env ] || cp .env.example .env
 python -m deepresearch.cli --preflight
 ```
@@ -14,7 +14,8 @@ python -m deepresearch.cli --preflight
 
 ```bash
 python -m compileall src/deepresearch
-python -m pytest -q
+ruff check src tests
+pytest tests -q
 ```
 
 ## Architecture Rules

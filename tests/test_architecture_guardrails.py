@@ -25,6 +25,7 @@ def test_no_machine_specific_paths_in_source_and_docs():
     ]
     targets = [
         Path("src/deepresearch"),
+        Path("docs"),
         Path("CLAUDE.md"),
         Path("agents.md"),
         Path("README.md"),

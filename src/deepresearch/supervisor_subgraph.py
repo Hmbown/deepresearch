@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import convert_to_messages
@@ -16,17 +17,16 @@ from .config import (
     get_max_concurrent_research_units,
     get_max_react_tool_calls,
     get_max_researcher_iterations,
-    get_supervisor_final_report_max_sections,
-    get_supervisor_notes_max_bullets,
-    get_supervisor_notes_word_budget,
 )
 from .nodes import think_tool
-from .prompts import COMPRESSION_PROMPT, FINAL_REPORT_PROMPT, SUPERVISOR_PROMPT
+from .prompts import SUPERVISOR_PROMPT
 from .researcher_subgraph import build_researcher_subgraph, extract_research_from_messages
 from .runtime_utils import invoke_runnable_with_config, log_runtime_event
 from .state import (
     ConductResearch,
     FALLBACK_CLARIFY_QUESTION,
+    FALLBACK_SUPERVISOR_NO_USEFUL_RESEARCH,
+    EvidenceRecord,
     ResearchState,
     ResearchComplete,
     SupervisorState,
@@ -34,6 +34,7 @@ from .state import (
     join_note_list,
     latest_ai_message,
     latest_human_text,
+    normalize_evidence_ledger,
     normalize_note_list,
     state_text_or_none,
     stringify_tool_output,
@@ -41,23 +42,61 @@ from .state import (
 )
 
 _logger = logging.getLogger(__name__)
+_MIN_EVIDENCE_RECORDS_FOR_COMPLETION = 2
+_MIN_SOURCE_DOMAINS_FOR_COMPLETION = 2
 
 
 def render_supervisor_prompt(current_date: str) -> str:
-    supervisor_prompt = SUPERVISOR_PROMPT.format(
+    return SUPERVISOR_PROMPT.format(
         current_date=current_date,
         max_concurrent_research_units=get_max_concurrent_research_units(),
         max_researcher_iterations=get_max_researcher_iterations(),
     )
-    compression_prompt = COMPRESSION_PROMPT.format(
-        notes_max_bullets=get_supervisor_notes_max_bullets(),
-        notes_word_budget=get_supervisor_notes_word_budget(),
-    )
-    final_report_prompt = FINAL_REPORT_PROMPT.format(
-        current_date=current_date,
-        final_report_max_sections=get_supervisor_final_report_max_sections(),
-    )
-    return "\n\n".join((supervisor_prompt.strip(), compression_prompt.strip(), final_report_prompt.strip()))
+
+
+def _has_any_tool_calls(messages: list[Any]) -> bool:
+    for message in messages:
+        if getattr(message, "type", "") != "ai":
+            continue
+        if extract_tool_calls(message):
+            return True
+    return False
+
+
+def _extract_source_domains(evidence_ledger: list[EvidenceRecord]) -> list[str]:
+    domains: set[str] = set()
+    for record in evidence_ledger:
+        for url in record.source_urls:
+            try:
+                parsed = urlparse(url)
+            except Exception:
+                continue
+            domain = (parsed.netloc or "").strip().lower()
+            if domain:
+                domains.add(domain)
+    return sorted(domains)
+
+
+def _evaluate_research_complete_gate(
+    evidence_ledger: list[EvidenceRecord],
+) -> tuple[bool, str, dict[str, Any]]:
+    record_count = len(evidence_ledger)
+    cited_record_count = sum(1 for record in evidence_ledger if record.source_urls)
+    source_domains = _extract_source_domains(evidence_ledger)
+    gate_fields = {
+        "evidence_record_count": record_count,
+        "cited_record_count": cited_record_count,
+        "source_domain_count": len(source_domains),
+        "source_domains": source_domains,
+    }
+
+    if record_count < _MIN_EVIDENCE_RECORDS_FOR_COMPLETION:
+        return False, "insufficient_evidence_records", gate_fields
+    if cited_record_count < _MIN_EVIDENCE_RECORDS_FOR_COMPLETION:
+        return False, "insufficient_cited_evidence", gate_fields
+    if len(source_domains) < _MIN_SOURCE_DOMAINS_FOR_COMPLETION:
+        return False, "insufficient_source_domains", gate_fields
+    return True, "pass", gate_fields
 
 
 async def supervisor(state: SupervisorState, config: RunnableConfig = None) -> dict[str, Any]:
@@ -129,7 +168,9 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
     tool_messages: list[ToolMessage] = []
     notes_additions: list[str] = []
     raw_notes_additions: list[str] = []
-    completed = bool(complete_calls)
+    evidence_additions: list[EvidenceRecord] = []
+    completion_rejection_reason: str | None = None
+    completed = False
 
     async def run_think_call(index: int, call: dict[str, Any]) -> ToolMessage:
         args = call.get("args") if isinstance(call.get("args"), dict) else {}
@@ -156,7 +197,9 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
         max_calls = get_max_react_tool_calls()
         researcher_recursion_limit = max_calls * 2 + 1
 
-        async def run_research_call(index: int, call: dict[str, Any]) -> tuple[ToolMessage, str | None, list[str]]:
+        async def run_research_call(
+            index: int, call: dict[str, Any]
+        ) -> tuple[ToolMessage, str | None, list[str], list[EvidenceRecord]]:
             call_id = str(call.get("id") or f"supervisor_research_{index}")
             args = call.get("args") if isinstance(call.get("args"), dict) else {}
             topic = state_text_or_none(args.get("research_topic"))
@@ -168,6 +211,7 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
                         tool_call_id=call_id,
                     ),
                     None,
+                    [],
                     [],
                 )
 
@@ -183,26 +227,28 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
                     name=ConductResearch.__name__,
                     tool_call_id=call_id,
                 )
-                return failure_message, None, []
+                return failure_message, None, [], []
 
             if not isinstance(result, dict):
                 result = {}
-            compressed, raw = extract_research_from_messages(result)
+            compressed, raw, evidence = extract_research_from_messages(result)
             content = compressed or join_note_list(raw) or "[Research unit returned no notes]"
             return (
                 ToolMessage(content=content, name=ConductResearch.__name__, tool_call_id=call_id),
                 compressed,
                 raw,
+                evidence,
             )
 
         research_results = await asyncio.gather(
             *(run_research_call(index, call) for index, call in enumerate(runnable_research_calls)),
         )
-        for tool_message, compressed, raw in research_results:
+        for tool_message, compressed, raw, evidence in research_results:
             tool_messages.append(tool_message)
             if compressed:
                 notes_additions.append(compressed)
             raw_notes_additions.extend(raw)
+            evidence_additions.extend(evidence)
         log_runtime_event(
             _logger,
             "supervisor_research_dispatch",
@@ -210,6 +256,27 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
             skipped_calls=len(skipped_research_calls),
             remaining_iterations=remaining_iterations,
         )
+
+    if complete_calls:
+        existing_evidence = normalize_evidence_ledger(state.get("evidence_ledger"))
+        combined_evidence = [*existing_evidence, *evidence_additions]
+        gate_passed, gate_reason, gate_fields = _evaluate_research_complete_gate(combined_evidence)
+        completed = gate_passed
+        if completed:
+            log_runtime_event(
+                _logger,
+                "supervisor_quality_gate_passed",
+                reason=gate_reason,
+                **gate_fields,
+            )
+        else:
+            completion_rejection_reason = gate_reason
+            log_runtime_event(
+                _logger,
+                "supervisor_quality_gate_failed",
+                reason=gate_reason,
+                **gate_fields,
+            )
 
     for index, call in enumerate(skipped_research_calls):
         tool_messages.append(
@@ -225,9 +292,16 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
         )
 
     for index, call in enumerate(complete_calls):
+        if completed:
+            content = "[ResearchComplete received]"
+        else:
+            content = (
+                "[ResearchComplete rejected: evidence quality gate failed "
+                f"(reason={completion_rejection_reason or 'unknown'})]"
+            )
         tool_messages.append(
             ToolMessage(
-                content="[ResearchComplete received]",
+                content=content,
                 name=ResearchComplete.__name__,
                 tool_call_id=str(call.get("id") or f"supervisor_complete_{index}"),
             )
@@ -235,15 +309,18 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig = None
     if completed:
         log_runtime_event(_logger, "supervisor_completion", research_iterations=research_iterations)
 
+    next_research_iterations = research_iterations + len(runnable_research_calls)
+    if completed:
+        next_research_iterations = get_max_researcher_iterations()
+    elif complete_calls and not runnable_research_calls:
+        next_research_iterations = min(get_max_researcher_iterations(), research_iterations + 1)
+
     return {
         "supervisor_messages": tool_messages,
         "notes": notes_additions,
         "raw_notes": raw_notes_additions,
-        "research_iterations": (
-            get_max_researcher_iterations()
-            if completed
-            else research_iterations + len(runnable_research_calls)
-        ),
+        "evidence_ledger": evidence_additions,
+        "research_iterations": next_research_iterations,
     }
 
 
@@ -308,6 +385,9 @@ async def research_supervisor(
         }
 
     supervisor_graph = build_supervisor_subgraph()
+    seed_notes = normalize_note_list(state.get("notes"))
+    seed_raw_notes = normalize_note_list(state.get("raw_notes"))
+    seed_evidence_ledger = normalize_evidence_ledger(state.get("evidence_ledger"))
     seed_supervisor_messages = list(convert_to_messages(state.get("supervisor_messages", [])))
     if not seed_supervisor_messages:
         seed_supervisor_messages = [HumanMessage(content=research_brief)]
@@ -315,17 +395,20 @@ async def research_supervisor(
     payload: dict[str, Any] = {
         "research_brief": research_brief,
         "supervisor_messages": seed_supervisor_messages,
-        "notes": normalize_note_list(state.get("notes")),
-        "raw_notes": normalize_note_list(state.get("raw_notes")),
+        "notes": seed_notes,
+        "raw_notes": seed_raw_notes,
+        "evidence_ledger": seed_evidence_ledger,
         "research_iterations": 0,
     }
+    supervisor_exception: str | None = None
 
     try:
         result = await invoke_runnable_with_config(supervisor_graph, payload, config)
     except asyncio.CancelledError:
         raise
-    except Exception:
-        _logger.exception("research_supervisor failed; proceeding with existing note state")
+    except Exception as exc:
+        _logger.exception("research_supervisor failed; activating deterministic fallback")
+        supervisor_exception = str(exc)
         result = {}
 
     if not isinstance(result, dict):
@@ -336,10 +419,58 @@ async def research_supervisor(
     if seed_supervisor_messages and len(supervisor_result_messages) >= len(seed_supervisor_messages):
         supervisor_delta = supervisor_result_messages[len(seed_supervisor_messages) :]
 
+    result_notes = normalize_note_list(result.get("notes"))
+    notes_delta = result_notes
+    if seed_notes and len(result_notes) >= len(seed_notes) and result_notes[: len(seed_notes)] == seed_notes:
+        notes_delta = result_notes[len(seed_notes) :]
+
+    result_raw_notes = normalize_note_list(result.get("raw_notes"))
+    raw_notes_delta = result_raw_notes
+    if (
+        seed_raw_notes
+        and len(result_raw_notes) >= len(seed_raw_notes)
+        and result_raw_notes[: len(seed_raw_notes)] == seed_raw_notes
+    ):
+        raw_notes_delta = result_raw_notes[len(seed_raw_notes) :]
+
+    result_evidence_ledger = normalize_evidence_ledger(result.get("evidence_ledger"))
+    evidence_delta = result_evidence_ledger
+    if seed_evidence_ledger and len(result_evidence_ledger) >= len(seed_evidence_ledger):
+        seed_prefix = [record.model_dump() for record in seed_evidence_ledger]
+        result_prefix = [record.model_dump() for record in result_evidence_ledger[: len(seed_evidence_ledger)]]
+        if result_prefix == seed_prefix:
+            evidence_delta = result_evidence_ledger[len(seed_evidence_ledger) :]
+
+    has_tool_calls = _has_any_tool_calls(supervisor_result_messages)
+    has_any_notes = bool(result_notes) or bool(result_raw_notes)
+    has_any_evidence = bool(result_evidence_ledger)
+    if not has_any_notes and not has_any_evidence:
+        fallback_reason = "exception" if supervisor_exception else "no_notes"
+        log_runtime_event(
+            _logger,
+            "supervisor_no_useful_research_fallback",
+            reason=fallback_reason,
+            had_tool_calls=has_tool_calls,
+            supervisor_message_count=len(supervisor_result_messages),
+            error=supervisor_exception,
+        )
+        fallback_text = FALLBACK_SUPERVISOR_NO_USEFUL_RESEARCH
+        return {
+            "messages": [AIMessage(content=fallback_text)],
+            "supervisor_messages": supervisor_delta,
+            "notes": [],
+            "raw_notes": [],
+            "evidence_ledger": [],
+            "final_report": fallback_text,
+            "intake_decision": "proceed",
+            "awaiting_clarification": False,
+        }
+
     return {
         "supervisor_messages": supervisor_delta,
-        "notes": normalize_note_list(result.get("notes")) or normalize_note_list(state.get("notes")),
-        "raw_notes": normalize_note_list(result.get("raw_notes")) or normalize_note_list(state.get("raw_notes")),
+        "notes": notes_delta,
+        "raw_notes": raw_notes_delta,
+        "evidence_ledger": evidence_delta,
         "intake_decision": "proceed",
         "awaiting_clarification": False,
     }

@@ -5,7 +5,7 @@ Primary goal: validate SHA-765 through SHA-768 end-to-end.
 
 Context:
 - Researcher execution is currently deep-agent-backed (`create_deep_agent` in `src/deepresearch/researcher_subgraph.py`).
-- The canonical runtime path remains `route_turn -> clarify_with_user -> write_research_brief -> research_supervisor -> final_report_generation`.
+- The canonical runtime path is `scope_intake -> research_supervisor -> final_report_generation`.
 - Online eval tooling exists in `src/deepresearch/evals/*` and `scripts/run_online_evals.py`.
 - Contributor guidance should match implemented runtime behavior and deferred scope.
 

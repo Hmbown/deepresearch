@@ -39,9 +39,9 @@ def _new_thread_id() -> str:
 def _thread_config(thread_id: str) -> dict[str, Any]:
     cfg: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
     if online_evals_enabled():
-        from .evals import build_eval_callback
+        from .evals import attach_online_eval_callback
 
-        cfg["callbacks"] = [build_eval_callback()]
+        cfg = attach_online_eval_callback(cfg)
     return cfg
 
 

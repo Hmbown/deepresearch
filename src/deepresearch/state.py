@@ -27,6 +27,10 @@ FALLBACK_FINAL_REPORT = (
     "I completed research execution but did not receive a final synthesis payload. "
     "Please ask a focused follow-up and I will refine from the collected notes."
 )
+FALLBACK_SUPERVISOR_NO_USEFUL_RESEARCH = (
+    "I could not produce usable research findings from the current scope in this run. "
+    "Please narrow the request (topic angle, timeframe, or source requirements) and I will retry."
+)
 FALLBACK_FOLLOWUP_CLARIFICATION = (
     "I want to ensure we are aligned: is your latest question still about the same research topic?"
 )
@@ -60,6 +64,14 @@ FOLLOW_UP_SHIFT_MARKERS = {
     "let",
     "lets",
     "let's",
+}
+STRONG_FOLLOW_UP_SHIFT_MARKERS = {
+    "instead",
+    "change",
+    "switch",
+    "different",
+    "another",
+    "unrelated",
 }
 STOP_TOKENS = {
     "a",
@@ -138,21 +150,24 @@ class ResearchComplete(BaseModel):
     pass
 
 
-class ResearcherState(TypedDict, total=False):
-    """State schema for one focused researcher loop."""
+class EvidenceRecord(BaseModel):
+    """Structured evidence item extracted from researcher output."""
 
-    researcher_messages: Annotated[Sequence[BaseMessage], add_messages]
-    tool_call_iterations: int
-    research_topic: str
-    compressed_research: str
-    raw_notes: Annotated[list[str], operator.add]
-
-
-class ResearcherOutputState(TypedDict, total=False):
-    """Filtered researcher output passed back to the supervisor."""
-
-    compressed_research: str
-    raw_notes: Annotated[list[str], operator.add]
+    claim: str = Field(description="Atomic factual claim or finding text.")
+    source_urls: list[str] = Field(
+        default_factory=list,
+        description="Source URLs that support this claim.",
+    )
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Deterministic confidence estimate in [0, 1].",
+    )
+    contradiction_or_uncertainty: str | None = Field(
+        default=None,
+        description="Contradiction or uncertainty note, if present.",
+    )
 
 
 class SupervisorState(TypedDict, total=False):
@@ -163,6 +178,7 @@ class SupervisorState(TypedDict, total=False):
     notes: Annotated[list[str], operator.add]
     research_iterations: int
     raw_notes: Annotated[list[str], operator.add]
+    evidence_ledger: Annotated[list[EvidenceRecord], operator.add]
 
 
 class ResearchState(MessagesState):
@@ -171,9 +187,13 @@ class ResearchState(MessagesState):
     research_brief: str | None = None
     intake_decision: Literal["clarify", "proceed"] | None = None
     awaiting_clarification: bool = False
-    supervisor_messages: Annotated[Sequence[BaseMessage], add_messages]
-    notes: Annotated[list[str], operator.add]
-    raw_notes: Annotated[list[str], operator.add]
+    # These fields are overwritten at intake handoff and supervisor completion.
+    # Using additive reducers here can silently retain stale prior-turn state under
+    # checkpointed/persisted threads.
+    supervisor_messages: Sequence[BaseMessage]
+    notes: list[str]
+    raw_notes: list[str]
+    evidence_ledger: list[EvidenceRecord]
     final_report: str = ""
 
 
@@ -237,12 +257,17 @@ def should_recheck_intent_on_follow_up(messages: list[Any]) -> bool:
     if not latest_tokens or not previous_tokens:
         return False
 
-    if latest_tokens & FOLLOW_UP_SHIFT_MARKERS:
-        return True
-    if latest_tokens & previous_tokens:
+    overlapping_tokens = latest_tokens & previous_tokens
+    if overlapping_tokens:
+        # Only force a shift recheck on explicit switch language. Common words like
+        # "new" should not trigger clarification if topic overlap is clear.
+        if latest_tokens & STRONG_FOLLOW_UP_SHIFT_MARKERS:
+            return True
         return False
     if any(marker in latest_tokens for marker in FOLLOW_UP_CONTINUATION_MARKERS):
         return False
+    if latest_tokens & FOLLOW_UP_SHIFT_MARKERS:
+        return True
 
     return True
 
@@ -268,6 +293,31 @@ def normalize_note_list(value: Any) -> list[str]:
         return normalized
     text = state_text_or_none(value)
     return [text] if text else []
+
+
+def normalize_evidence_ledger(value: Any) -> list[EvidenceRecord]:
+    """Normalize evidence ledger values into validated EvidenceRecord items."""
+    if value is None:
+        return []
+
+    items: list[Any]
+    if isinstance(value, list):
+        items = value
+    else:
+        items = [value]
+
+    normalized: list[EvidenceRecord] = []
+    for item in items:
+        if isinstance(item, EvidenceRecord):
+            normalized.append(item)
+            continue
+        if isinstance(item, dict):
+            try:
+                normalized.append(EvidenceRecord.model_validate(item))
+            except Exception:
+                continue
+            continue
+    return normalized
 
 
 def join_note_list(values: Any) -> str | None:

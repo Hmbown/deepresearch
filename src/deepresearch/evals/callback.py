@@ -109,3 +109,21 @@ class OnlineEvalCallbackHandler(BaseCallbackHandler):
 def build_eval_callback(client: Client | None = None) -> OnlineEvalCallbackHandler:
     """Create an OnlineEvalCallbackHandler ready to attach to invoke config."""
     return OnlineEvalCallbackHandler(client=client)
+
+
+def attach_online_eval_callback(
+    config: dict[str, Any] | None = None,
+    *,
+    client: Client | None = None,
+) -> dict[str, Any]:
+    """Return invoke config with one OnlineEvalCallbackHandler attached.
+
+    Use this for API/Studio-style invocations where callbacks are not injected
+    by the CLI wrapper.
+    """
+    resolved = dict(config or {})
+    callbacks = list(resolved.get("callbacks", []))
+    if not any(isinstance(callback, OnlineEvalCallbackHandler) for callback in callbacks):
+        callbacks.append(build_eval_callback(client=client))
+    resolved["callbacks"] = callbacks
+    return resolved

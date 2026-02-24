@@ -91,11 +91,13 @@ def test_researcher_deep_agent_loop_preserves_sources(monkeypatch):
     assert fake_graph.calls == 1
     assert fake_graph.invoked_messages is not None
 
-    compressed, raw_notes = extract_research_from_messages(result)
+    compressed, raw_notes, evidence_ledger = extract_research_from_messages(result)
 
     assert raw_notes
     assert any("https://example.com/source-a" in note for note in raw_notes)
     assert any("[1]" in note or "[2]" in note for note in raw_notes)
+    assert evidence_ledger
+    assert any(record.source_urls for record in evidence_ledger)
     assert compressed is not None
     assert "[1]" in compressed or "https://example.com/source-a" in compressed
 
@@ -112,19 +114,22 @@ def test_extract_research_from_messages_excludes_think_tool():
         AIMessage(content="Final synthesis [1]"),
     ]
 
-    compressed, raw_notes = extract_research_from_messages({"messages": messages})
+    compressed, raw_notes, evidence_ledger = extract_research_from_messages({"messages": messages})
     assert compressed is not None
     assert "Reflection recorded" not in compressed
     assert raw_notes
+    assert evidence_ledger
     assert not any("Reflection recorded" in note for note in raw_notes)
 
 
 def test_extract_research_from_messages_empty():
     """Verify graceful handling of empty results."""
-    compressed, raw_notes = extract_research_from_messages({"messages": []})
+    compressed, raw_notes, evidence_ledger = extract_research_from_messages({"messages": []})
     assert compressed is None
     assert raw_notes == []
+    assert evidence_ledger == []
 
-    compressed, raw_notes = extract_research_from_messages({})
+    compressed, raw_notes, evidence_ledger = extract_research_from_messages({})
     assert compressed is None
     assert raw_notes == []
+    assert evidence_ledger == []

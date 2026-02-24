@@ -22,10 +22,19 @@ deepresearch/
 ├── src/deepresearch/
 │   ├── __init__.py
 │   ├── graph.py
+│   ├── researcher_subgraph.py
+│   ├── supervisor_subgraph.py
+│   ├── intake.py
+│   ├── report.py
+│   ├── state.py
 │   ├── nodes.py
 │   ├── prompts.py
 │   ├── config.py
-│   └── cli.py
+│   ├── env.py
+│   ├── runtime_utils.py
+│   ├── cli.py
+│   ├── message_utils.py
+│   └── evals/
 ├── tests/
 ├── langgraph.json
 ├── pyproject.toml
@@ -37,7 +46,7 @@ deepresearch/
 
 The app is created with native LangGraph subgraphs in `build_app()`:
 
-- Main path: `route_turn -> clarify_with_user -> write_research_brief -> research_supervisor -> final_report_generation`.
+- Main path: `scope_intake -> research_supervisor -> final_report_generation`.
 - Supervisor subgraph delegates focused work via `ConductResearch` and can run researchers in parallel.
 - Researcher subgraph runs a bounded tool loop using `search_web`, `fetch_url`, and `think_tool`, then compresses findings.
 - Final report generation synthesizes supervisor notes into the user-facing response.
@@ -66,16 +75,16 @@ Keep and preserve:
 
 - Decision: keep one canonical runtime path in `build_app()` with no dual pipelines, workflow alternates, or report-generation branches.
 - Guardrail evidence:
-  - `src/deepresearch/graph.py` contains one main route path (`route_turn -> clarify_with_user -> write_research_brief -> research_supervisor -> final_report_generation`).
+  - `src/deepresearch/graph.py` contains one main route path (`scope_intake -> research_supervisor -> final_report_generation`).
   - `tests/test_architecture_guardrails.py` blocks legacy graph tokens and machine-specific path leakage.
 - This is the canonical implementation rule until a concrete request justifies expansion.
 
-## Current Baseline (Updated 2026-02-23)
+## Current Baseline (Updated 2026-02-24)
 
 - Researcher runtime is deep-agent-backed (`src/deepresearch/researcher_subgraph.py` via `create_deep_agent`).
 - Online eval framework is implemented (`src/deepresearch/evals/*`, `scripts/run_online_evals.py`).
 - Online eval operations run manually via workflow dispatch (`.github/workflows/online-evals.yml`) or direct script execution.
-- Canonical runtime path remains `route_turn -> clarify_with_user -> write_research_brief -> research_supervisor -> final_report_generation`.
+- Canonical runtime path remains `scope_intake -> research_supervisor -> final_report_generation`.
 
 ## Deferred Work (Issues 752, 753)
 

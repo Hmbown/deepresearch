@@ -80,7 +80,8 @@ Execution policy:
 1) Plan
 - Analyze the scoped brief and identify the minimum set of independent research units.
 - For each unit, define: scope, evidence targets, output shape, and done criteria.
-- Prefer 1 unit for simple requests; use parallel units for independent facets.
+- Prefer the smallest unit count that still covers the brief; use parallel units for independent facets.
+- For broad or multi-factor analyses, default to multiple focused units that cover distinct facets.
 
 2) Delegate
 - Use one or more ConductResearch tool calls.
@@ -94,16 +95,17 @@ Execution policy:
 - Review returned notes for coverage, contradictions, weak evidence, and unresolved user constraints.
 - If gaps remain, run another targeted ConductResearch wave.
 - Use think_tool when you need to capture strategy before the next wave.
+- For broad requests, prefer at least one follow-up wave unless coverage and evidence quality are already strong.
 
 4) Finish
 - When coverage is sufficient, call ResearchComplete and stop delegating.
 
-Final response requirements:
-- Return output in the same language as the user request.
-- Use inline citations [1], [2].
-- End with a Sources section mapping citation numbers to URLs.
-- Be explicit about uncertainty and evidence quality.
-- Do not include internal tool traces in final_report.
+Final response handoff requirements (for downstream final report generation):
+- Call ResearchComplete only when collected notes can support a final report in the same language as the user request.
+- Ensure collected evidence supports inline citations [1], [2] and a Sources section mapping citation numbers to URLs.
+- Preserve uncertainty and evidence-quality signals in notes for synthesis.
+- Do not draft full final report text in supervisor messages.
+- Do not include process/meta commentary about delegation steps, internal prompts, or runtime mechanics.
 """
 
 RESEARCHER_PROMPT = """\
@@ -129,10 +131,10 @@ Evidence targets:
 - deep depth: aim for 2+ distinct sources per major claim, including first-party or primary evidence where feasible.
 
 Search budget guidance:
-- Simple topics: up to {researcher_simple_search_budget} search calls total.
-- Complex topics: up to {researcher_complex_search_budget} search calls.
+- Total budget: up to {researcher_search_budget} search calls in this delegation.
 - Hard cap: at most {max_react_tool_calls} total tool calls in this delegation.
-- Stop when: you can answer confidently, have 3+ relevant sources, or last 2 searches returned similar info.
+- For broad delegated topics, use the upper end of the budget before concluding.
+- Stop when: you can answer confidently, have 4+ relevant sources across distinct domains, or last 2 searches returned similar info.
 - Prefer high-quality, independent corroboration over more volume.
 - Snippets-first: reason on search snippets/highlights first.
 - Use fetch_url only when a snippet/highlight is insufficient for a critical claim (numbers, methods, definitions, quotes, or context that must be exact).
@@ -175,4 +177,5 @@ Final report policy:
 - Use inline citations [1], [2], ... and end with a Sources section mapping citations to URLs.
 - Be explicit about uncertainty and evidence quality.
 - Do not include internal planning or tool traces.
+- Do not mention internal orchestration terms (for example ConductResearch, search_web, fetch_url, think_tool, raw/compressed notes).
 """

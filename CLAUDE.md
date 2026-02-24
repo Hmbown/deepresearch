@@ -19,11 +19,20 @@ Until this repo is published as the reference implementation, keep architecture 
 deepresearch/
 ├── src/deepresearch/
 │   ├── __init__.py
-│   ├── graph.py       # create_deep_agent() assembly and exported `app`
-│   ├── nodes.py       # reusable research tools + deterministic search processing
-│   ├── prompts.py     # CLARIFY/BRIEF + SUPERVISOR_PROMPT + RESEARCHER_PROMPT
-│   ├── config.py      # model + search provider config
-│   └── cli.py         # CLI invoke path (messages-based)
+│   ├── graph.py                  # LangGraph runtime assembly (build_app, exported app)
+│   ├── researcher_subgraph.py    # Deep agent researcher + evidence extraction
+│   ├── supervisor_subgraph.py    # Supervisor loop with parallel dispatch + quality gate
+│   ├── intake.py                 # Scope intake (clarification + brief synthesis)
+│   ├── report.py                 # Final report synthesis with citations
+│   ├── state.py                  # Shared state models (EvidenceRecord, ResearchState)
+│   ├── nodes.py                  # Research tools (search_web, fetch_url, think_tool)
+│   ├── prompts.py                # All prompt templates
+│   ├── config.py                 # Model, search, and runtime configuration
+│   ├── env.py                    # Environment bootstrap and preflight checks
+│   ├── runtime_utils.py          # Runnable invocation helpers
+│   ├── cli.py                    # CLI entry point and interactive mode
+│   ├── message_utils.py          # Message content extraction helpers
+│   └── evals/                    # Online LLM-as-judge evaluation framework
 ├── tests/
 ├── langgraph.json
 ├── pyproject.toml

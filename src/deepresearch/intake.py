@@ -1,4 +1,4 @@
-"""Intake routing and brief generation nodes."""
+"""Intake scoping and brief generation for supervisor handoff."""
 
 from __future__ import annotations
 
@@ -27,29 +27,84 @@ from .state import (
 )
 
 
-async def route_turn(
-    state: ResearchState,
-    config: RunnableConfig = None,
-) -> Command[Literal["clarify_with_user", "write_research_brief"]]:
-    """Route each turn to intake or direct brief generation."""
-    del config  # RunnableConfig is accepted for compatibility with graph invocation.
+def _is_follow_up_topic_shift(state: ResearchState, messages: list[Any]) -> bool:
+    return state.get("intake_decision") == "proceed" and should_recheck_intent_on_follow_up(messages)
+
+
+def _build_topic_shift_reset_update() -> dict[str, Any]:
+    return {
+        "research_brief": None,
+        "supervisor_messages": [],
+        "notes": [],
+        "raw_notes": [],
+        "evidence_ledger": [],
+        "final_report": "",
+    }
+
+
+def _should_run_clarification_pass(state: ResearchState, messages: list[Any]) -> bool:
     if bool(state.get("awaiting_clarification")):
-        return Command(goto="clarify_with_user")
-    if state.get("intake_decision") is None and not state.get("research_brief"):
-        return Command(goto="clarify_with_user")
-    if state.get("intake_decision") == "proceed" and should_recheck_intent_on_follow_up(
-        list(convert_to_messages(state.get("messages", [])))
-    ):
-        return Command(goto="clarify_with_user")
-    return Command(goto="write_research_brief")
+        return True
+
+    intake_decision = state.get("intake_decision")
+    if intake_decision is None:
+        return not bool(state.get("research_brief"))
+
+    if intake_decision == "proceed":
+        return _is_follow_up_topic_shift(state, messages)
+
+    return True
 
 
-async def clarify_with_user(
+async def _generate_research_brief(messages: list[Any], config: RunnableConfig = None) -> str:
+    """Generate a focused research brief from full chat history."""
+    structured_model = get_llm("orchestrator").with_structured_output(ResearchBrief)
+    prompt_content = RESEARCH_BRIEF_PROMPT.format(
+        messages=get_buffer_string(messages),
+        date=today_utc_date(),
+    )
+    response = await invoke_structured_with_retries(
+        structured_model,
+        prompt_content,
+        config,
+        schema_name="ResearchBrief",
+        max_retries=get_max_structured_output_retries(),
+    )
+
+    research_brief = str(getattr(response, "research_brief", "")).strip()
+    if not research_brief:
+        research_brief = latest_human_text(messages)
+    return research_brief
+
+
+def _build_research_handoff_update(research_brief: str) -> dict[str, Any]:
+    supervisor_messages = [HumanMessage(content=research_brief)] if research_brief else []
+    return {
+        "research_brief": research_brief,
+        "supervisor_messages": supervisor_messages,
+        "notes": [],
+        "raw_notes": [],
+        "evidence_ledger": [],
+        "final_report": "",
+        "intake_decision": "proceed",
+        "awaiting_clarification": False,
+    }
+
+
+async def scope_intake(
     state: ResearchState,
     config: RunnableConfig = None,
-) -> Command[Literal["write_research_brief", "__end__"]]:
-    """Ask one clarification question when needed; otherwise acknowledge and proceed."""
+) -> Command[Literal["research_supervisor", "__end__"]]:
+    """Handle clarification and brief synthesis before handing off to the supervisor."""
     messages = list(convert_to_messages(state.get("messages", [])))
+    follow_up_topic_shift = _is_follow_up_topic_shift(state, messages)
+    if not _should_run_clarification_pass(state, messages):
+        research_brief = await _generate_research_brief(messages, config)
+        return Command(
+            goto="research_supervisor",
+            update=_build_research_handoff_update(research_brief),
+        )
+
     latest_user_text = latest_human_text(messages)
     if not latest_user_text:
         return Command(
@@ -83,52 +138,23 @@ async def clarify_with_user(
     need_clarification = bool(getattr(response, "need_clarification", False))
     if need_clarification:
         question = str(getattr(response, "question", "")).strip() or FALLBACK_CLARIFY_QUESTION
+        update = {
+            "messages": [AIMessage(content=question)],
+            "intake_decision": "clarify",
+            "awaiting_clarification": True,
+        }
+        if follow_up_topic_shift:
+            update.update(_build_topic_shift_reset_update())
         return Command(
             goto=END,
-            update={
-                "messages": [AIMessage(content=question)],
-                "intake_decision": "clarify",
-                "awaiting_clarification": True,
-            },
+            update=update,
         )
 
     verification = str(getattr(response, "verification", "")).strip() or FALLBACK_VERIFICATION
+    research_brief = await _generate_research_brief(messages, config)
+    update = _build_research_handoff_update(research_brief)
+    update["messages"] = [AIMessage(content=verification)]
     return Command(
-        goto="write_research_brief",
-        update={
-            "messages": [AIMessage(content=verification)],
-            "intake_decision": "proceed",
-            "awaiting_clarification": False,
-        },
+        goto="research_supervisor",
+        update=update,
     )
-
-
-async def write_research_brief(state: ResearchState, config: RunnableConfig = None) -> dict[str, Any]:
-    """Generate a focused research brief from full chat history."""
-    messages = list(convert_to_messages(state.get("messages", [])))
-    structured_model = get_llm("orchestrator").with_structured_output(ResearchBrief)
-    prompt_content = RESEARCH_BRIEF_PROMPT.format(
-        messages=get_buffer_string(messages),
-        date=today_utc_date(),
-    )
-    response = await invoke_structured_with_retries(
-        structured_model,
-        prompt_content,
-        config,
-        schema_name="ResearchBrief",
-        max_retries=get_max_structured_output_retries(),
-    )
-
-    research_brief = str(getattr(response, "research_brief", "")).strip()
-    if not research_brief:
-        research_brief = latest_human_text(messages)
-
-    supervisor_messages = [HumanMessage(content=research_brief)] if research_brief else []
-    return {
-        "research_brief": research_brief,
-        "supervisor_messages": supervisor_messages,
-        "notes": [],
-        "raw_notes": [],
-        "final_report": "",
-        "awaiting_clarification": False,
-    }

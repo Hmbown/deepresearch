@@ -27,17 +27,120 @@ def test_resolve_model_for_role_defaults_and_overrides(monkeypatch):
 def test_get_llm_passes_resolved_model(monkeypatch):
     captured = {}
 
-    def fake_init_chat_model(*, model):
-        captured["model"] = model
-        return {"model": model}
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
 
     monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
     monkeypatch.setenv("ORCHESTRATOR_MODEL", "openai:gpt-test-52")
     monkeypatch.setenv("SUBAGENT_MODEL", "openai:gpt-test-mini")
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "false")
 
     llm = config.get_llm("subagent")
     assert llm == {"model": "openai:gpt-test-mini"}
-    assert captured["model"] == "openai:gpt-test-mini"
+    assert captured["kwargs"] == {"model": "openai:gpt-test-mini"}
+
+
+def test_openai_responses_api_defaults_enabled(monkeypatch):
+    monkeypatch.delenv("OPENAI_USE_RESPONSES_API", raising=False)
+    assert config.openai_responses_api_enabled() is True
+
+
+def test_openai_responses_api_explicit_opt_out(monkeypatch):
+    """Verify explicit opt-out via OPENAI_USE_RESPONSES_API=false disables Responses API."""
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("ORCHESTRATOR_MODEL", "openai:gpt-test")
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "false")
+
+    config.get_llm("orchestrator")
+    assert "use_responses_api" not in captured["kwargs"]
+    assert captured["kwargs"] == {"model": "openai:gpt-test"}
+
+
+def test_openai_responses_api_non_openai_provider_unaffected(monkeypatch):
+    """Responses API flags should not be passed for non-OpenAI providers."""
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("ORCHESTRATOR_MODEL", "anthropic:claude-opus-4-6")
+    monkeypatch.delenv("OPENAI_USE_RESPONSES_API", raising=False)
+
+    config.get_llm("orchestrator")
+    assert "use_responses_api" not in captured["kwargs"]
+    assert captured["kwargs"] == {"model": "anthropic:claude-opus-4-6"}
+
+
+def test_get_llm_uses_openai_responses_api_by_default(monkeypatch):
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("SUBAGENT_MODEL", "openai:gpt-test-mini")
+    monkeypatch.delenv("OPENAI_USE_RESPONSES_API", raising=False)
+    monkeypatch.delenv("OPENAI_USE_PREVIOUS_RESPONSE_ID", raising=False)
+    monkeypatch.delenv("OPENAI_OUTPUT_VERSION", raising=False)
+
+    llm = config.get_llm("subagent")
+    assert llm["model"] == "openai:gpt-test-mini"
+    assert llm["use_responses_api"] is True
+    assert llm["output_version"] == "responses/v1"
+    assert "use_previous_response_id" not in llm
+    assert captured["kwargs"] == llm
+
+
+def test_get_llm_can_enable_openai_responses_api(monkeypatch):
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("SUBAGENT_MODEL", "openai:gpt-test-mini")
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "true")
+    monkeypatch.setenv("OPENAI_OUTPUT_VERSION", "responses/v1")
+    monkeypatch.setenv("OPENAI_USE_PREVIOUS_RESPONSE_ID", "true")
+
+    llm = config.get_llm("subagent")
+    assert llm == {
+        "model": "openai:gpt-test-mini",
+        "use_responses_api": True,
+        "output_version": "responses/v1",
+        "use_previous_response_id": True,
+    }
+    assert captured["kwargs"] == llm
+
+
+def test_get_llm_openai_responses_flag_falls_back_when_kwargs_unsupported(monkeypatch):
+    calls: list[dict] = []
+
+    def fake_init_chat_model(**kwargs):
+        calls.append(kwargs)
+        if "use_responses_api" in kwargs:
+            raise TypeError("unexpected keyword argument 'use_responses_api'")
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("ORCHESTRATOR_MODEL", "openai:gpt-test-52")
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "true")
+
+    llm = config.get_llm("orchestrator")
+    assert llm == {"model": "openai:gpt-test-52"}
+    assert calls[0]["use_responses_api"] is True
+    assert calls[1] == {"model": "openai:gpt-test-52"}
 
 
 def test_int_env_config_keys_fall_back_to_defaults(monkeypatch):
@@ -45,8 +148,7 @@ def test_int_env_config_keys_fall_back_to_defaults(monkeypatch):
     monkeypatch.setenv("MAX_REACT_TOOL_CALLS", "0")
     monkeypatch.setenv("MAX_CONCURRENT_RESEARCH_UNITS", "-3")
     monkeypatch.setenv("MAX_RESEARCHER_ITERATIONS", "-2")
-    monkeypatch.setenv("RESEARCHER_SIMPLE_SEARCH_BUDGET", "abc")
-    monkeypatch.setenv("RESEARCHER_COMPLEX_SEARCH_BUDGET", "-1")
+    monkeypatch.setenv("RESEARCHER_SEARCH_BUDGET", "abc")
     monkeypatch.setenv("SUPERVISOR_NOTES_MAX_BULLETS", "0")
     monkeypatch.setenv("SUPERVISOR_NOTES_WORD_BUDGET", "10")
     monkeypatch.setenv("SUPERVISOR_FINAL_REPORT_MAX_SECTIONS", "-10")
@@ -55,8 +157,7 @@ def test_int_env_config_keys_fall_back_to_defaults(monkeypatch):
     assert config.get_max_react_tool_calls() == config.DEFAULT_MAX_REACT_TOOL_CALLS
     assert config.get_max_concurrent_research_units() == config.DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS
     assert config.get_max_researcher_iterations() == config.DEFAULT_MAX_RESEARCHER_ITERATIONS
-    assert config.get_researcher_simple_search_budget() == config.DEFAULT_RESEARCHER_SIMPLE_SEARCH_BUDGET
-    assert config.get_researcher_complex_search_budget() == config.DEFAULT_RESEARCHER_COMPLEX_SEARCH_BUDGET
+    assert config.get_researcher_search_budget() == config.DEFAULT_RESEARCHER_SEARCH_BUDGET
     assert config.get_supervisor_notes_max_bullets() == config.DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS
     assert config.get_supervisor_notes_word_budget() == config.DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET
     assert (
@@ -173,24 +274,30 @@ def test_runtime_event_logs_enabled_reads_env_truthiness(monkeypatch):
 
 
 def test_search_budget_knobs_parse_and_default(monkeypatch):
-    monkeypatch.delenv("RESEARCHER_SIMPLE_SEARCH_BUDGET", raising=False)
-    monkeypatch.delenv("RESEARCHER_COMPLEX_SEARCH_BUDGET", raising=False)
+    monkeypatch.delenv("RESEARCHER_SEARCH_BUDGET", raising=False)
     monkeypatch.delenv("MAX_CONCURRENT_RESEARCH_UNITS", raising=False)
     monkeypatch.delenv("MAX_RESEARCHER_ITERATIONS", raising=False)
 
-    assert config.get_researcher_simple_search_budget() == config.DEFAULT_RESEARCHER_SIMPLE_SEARCH_BUDGET
-    assert config.get_researcher_complex_search_budget() == config.DEFAULT_RESEARCHER_COMPLEX_SEARCH_BUDGET
+    assert config.get_researcher_search_budget() == config.DEFAULT_RESEARCHER_SEARCH_BUDGET
     assert config.get_max_concurrent_research_units() == config.DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS
     assert config.get_max_researcher_iterations() == config.DEFAULT_MAX_RESEARCHER_ITERATIONS
 
-    monkeypatch.setenv("RESEARCHER_SIMPLE_SEARCH_BUDGET", "7")
-    monkeypatch.setenv("RESEARCHER_COMPLEX_SEARCH_BUDGET", "11")
+    monkeypatch.setenv("RESEARCHER_SEARCH_BUDGET", "9")
     monkeypatch.setenv("MAX_CONCURRENT_RESEARCH_UNITS", "3")
     monkeypatch.setenv("MAX_RESEARCHER_ITERATIONS", "9")
-    assert config.get_researcher_simple_search_budget() == 7
-    assert config.get_researcher_complex_search_budget() == 11
+    assert config.get_researcher_search_budget() == 9
     assert config.get_max_concurrent_research_units() == 3
     assert config.get_max_researcher_iterations() == 9
+
+
+def test_runtime_defaults_use_extended_profile_values():
+    assert config.DEFAULT_RESEARCHER_SEARCH_BUDGET == 8
+    assert config.DEFAULT_MAX_REACT_TOOL_CALLS == 20
+    assert config.DEFAULT_MAX_CONCURRENT_RESEARCH_UNITS == 6
+    assert config.DEFAULT_MAX_RESEARCHER_ITERATIONS == 16
+    assert config.DEFAULT_SUPERVISOR_NOTES_MAX_BULLETS == 20
+    assert config.DEFAULT_SUPERVISOR_NOTES_WORD_BUDGET == 500
+    assert config.DEFAULT_SUPERVISOR_FINAL_REPORT_MAX_SECTIONS == 12
 
 
 def test_cli_extract_text_content_from_mixed_blocks():

@@ -29,6 +29,7 @@ deepresearch = "deepresearch.cli:main"
 [project.optional-dependencies]
 dev = [
     "ruff==0.13.0",
+    "pytest==8.4.1",
 ]
 
 [build-system]

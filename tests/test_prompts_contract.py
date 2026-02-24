@@ -40,6 +40,7 @@ def test_supervisor_prompt_is_native_multi_agent_contract():
         "MAX_RESEARCHER_ITERATIONS",
         "same language as the user request",
         "inline citations [1], [2]",
+        "Do not draft full final report text in supervisor messages.",
     ]
     for token in required_tokens:
         assert token in prompts.SUPERVISOR_PROMPT
@@ -58,8 +59,7 @@ def test_researcher_prompt_preserves_research_quality_contract():
         "Search budget guidance",
         "Contradictions/Uncertainties",
         "inline citation numbers [1], [2]",
-        "researcher_simple_search_budget",
-        "researcher_complex_search_budget",
+        "researcher_search_budget",
         "max_react_tool_calls",
         "same language as the user request",
     ]
@@ -83,8 +83,7 @@ def test_prompt_templates_render_with_expected_keys_and_fail_closed_on_missing_f
         max_researcher_iterations=6,
     )
     assert prompts.RESEARCHER_PROMPT.format(
-        researcher_simple_search_budget=3,
-        researcher_complex_search_budget=5,
+        researcher_search_budget=8,
         max_react_tool_calls=10,
     )
     assert prompts.COMPRESSION_PROMPT.format(notes_max_bullets=8, notes_word_budget=250)
@@ -97,7 +96,7 @@ def test_prompt_templates_render_with_expected_keys_and_fail_closed_on_missing_f
     with pytest.raises(KeyError):
         prompts.SUPERVISOR_PROMPT.format(current_date="2026-02-23")
     with pytest.raises(KeyError):
-        prompts.RESEARCHER_PROMPT.format(researcher_simple_search_budget=3)
+        prompts.RESEARCHER_PROMPT.format(researcher_search_budget=8)
 
 
 def test_researcher_prompt_sections_are_explicit_and_ordered():

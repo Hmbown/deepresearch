@@ -16,7 +16,11 @@ from deepresearch.evals.evaluators import (
     eval_composite,
     eval_process_quality,
 )
-from deepresearch.evals.callback import OnlineEvalCallbackHandler, build_eval_callback
+from deepresearch.evals.callback import (
+    OnlineEvalCallbackHandler,
+    attach_online_eval_callback,
+    build_eval_callback,
+)
 
 
 # --- Config tests ---
@@ -243,6 +247,20 @@ def test_eval_process_quality_handles_client_failure():
 def test_build_eval_callback_returns_handler():
     handler = build_eval_callback()
     assert isinstance(handler, OnlineEvalCallbackHandler)
+
+
+def test_attach_online_eval_callback_appends_handler():
+    existing = object()
+    cfg = attach_online_eval_callback({"configurable": {"thread_id": "t-1"}, "callbacks": [existing]})
+    assert cfg["callbacks"][0] is existing
+    assert len(cfg["callbacks"]) == 2
+    assert isinstance(cfg["callbacks"][1], OnlineEvalCallbackHandler)
+
+
+def test_attach_online_eval_callback_dedupes_existing_handler():
+    handler = OnlineEvalCallbackHandler(client=MagicMock())
+    cfg = attach_online_eval_callback({"callbacks": [handler]})
+    assert cfg["callbacks"] == [handler]
 
 
 def test_callback_handler_skips_non_root_runs():
