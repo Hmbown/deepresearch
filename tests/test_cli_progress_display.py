@@ -88,10 +88,11 @@ def test_progress_display_search_summary_truncates_domain_list():
     assert "a.com, b.org, c.net, ..." in rendered
 
 
-def test_progress_display_quality_gate_rejection_is_user_visible():
+def test_progress_display_wave_summary_shows_source_counts():
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
 
+    display.handle_event(_supervisor_prepare_start_event())
     display.handle_event(
         _supervisor_progress_event(
             {
@@ -102,20 +103,17 @@ def test_progress_display_quality_gate_rejection_is_user_visible():
                 "remaining_iterations": 10,
                 "max_concurrent_research_units": 6,
                 "max_researcher_iterations": 16,
-                "quality_gate_status": "retry",
-                "quality_gate_reason": "insufficient_source_domains",
-                "evidence_record_count": 1,
-                "source_domain_count": 1,
-                "source_domains": ["example.com"],
+                "evidence_record_count": 5,
+                "source_domain_count": 3,
+                "source_domains": ["example.com", "example.org", "example.net"],
                 "research_units": [],
             }
         )
     )
 
     rendered = stream.getvalue()
-    assert "Quality gate:" in rendered
-    assert "RETRY" in rendered
-    assert "insufficient_source_domains" in rendered
+    assert "5 sources" in rendered
+    assert "3 domains" in rendered
 
 
 def test_progress_display_wave_dispatch_uses_runtime_progress_payload():
@@ -230,7 +228,8 @@ def test_progress_display_failed_track_uses_planned_track_index_label():
     assert 'track[2] "Track two topic" encountered a recursion limit (41 steps)' in rendered
 
 
-def test_progress_display_ignores_supervisor_tool_message_text_when_runtime_progress_present():
+def test_progress_display_uses_runtime_progress_not_tool_messages():
+    """Verify CLI reads source counts from runtime_progress payload, not from tool messages."""
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
 
@@ -245,8 +244,6 @@ def test_progress_display_ignores_supervisor_tool_message_text_when_runtime_prog
                 "remaining_iterations": 7,
                 "max_concurrent_research_units": 6,
                 "max_researcher_iterations": 16,
-                "quality_gate_status": "retry",
-                "quality_gate_reason": "insufficient_evidence_records",
                 "evidence_record_count": 1,
                 "source_domain_count": 1,
                 "source_domains": ["example.com"],
@@ -256,9 +253,8 @@ def test_progress_display_ignores_supervisor_tool_message_text_when_runtime_prog
     )
 
     rendered = stream.getvalue()
-    assert "RETRY" in rendered
-    assert "insufficient_evidence_records" in rendered
-    assert "PASS" not in rendered
+    assert "1 sources" in rendered
+    assert "1 domains" in rendered
 
 
 def test_progress_display_no_dispatch_or_gate_output_when_runtime_progress_absent():

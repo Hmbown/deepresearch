@@ -242,7 +242,7 @@ def _build_fetch_url_tool(
         """
         import httpx
 
-        max_chars = 8000
+        max_chars = 20000
         is_valid_target, blocked_reason = _validate_fetch_url_target(url)
         if not is_valid_target:
             emit({"event": "fetch_url_blocked", "url": url, "reason": blocked_reason})
@@ -295,7 +295,7 @@ def _build_search_tool_with_processing(
     base_search_tool: Any,
     writer: Callable[[dict[str, Any]], None] | None = None,
 ):
-    """Wrap provider search with deterministic normalize→dedupe→truncate/format."""
+    """Wrap provider search with deterministic normalize→dedupe→sort→truncate/format."""
 
     def emit(event: dict[str, Any]) -> None:
         if writer is not None:
@@ -325,7 +325,7 @@ def _build_search_tool_with_processing(
             payload_candidates.append(
                 {
                     "query": query,
-                    "num_results": 5,
+                    "num_results": 10,
                     "highlights": True,
                     "type": "auto",
                 }

@@ -90,7 +90,7 @@ def _result_section_title(result: dict[str, Any], elapsed_seconds: float | None 
         return f"CLARIFICATION ({_format_duration(elapsed_seconds)})"
 
     evidence_count, domain_count = _result_evidence_stats(result)
-    parts = [f"{evidence_count} evidence records", f"{domain_count} sources"]
+    parts = [f"{evidence_count} sources", f"{domain_count} domains"]
     if elapsed_seconds is not None:
         parts.append(_format_duration(elapsed_seconds))
     return f"RESEARCH REPORT ({' | '.join(parts)})"
@@ -212,6 +212,11 @@ def _collect_evidence_from_research_output(output: Mapping[str, Any] | None) -> 
     messages = output.get("messages")
     if isinstance(messages, list):
         for msg in messages:
+            # Only parse URLs from AI-authored content. Tool outputs (especially search results)
+            # often include many "URL:" lines that are not actually cited evidence and will
+            # wildly inflate the domain counts in the CLI progress display.
+            if getattr(msg, "type", "") != "ai":
+                continue
             content = _extract_text_content(getattr(msg, "content", "")).strip()
             if not content:
                 continue
@@ -358,12 +363,9 @@ class ProgressDisplay:
     def _add_evidence(self, raw_records: Any, raw_urls: list[str] | None = None) -> None:
         records = normalize_evidence_ledger(raw_records)
         for record in records:
-            claim = (record.claim or "").strip()
             source_urls = [str(url).strip() for url in getattr(record, "source_urls", []) if str(url).strip()]
-            confidence = getattr(record, "confidence", None)
-            uncertainty = getattr(record, "contradiction_or_uncertainty", None)
-            key = f"{claim}|{','.join(sorted(set(source_urls)))}|{confidence}|{uncertainty or ''}"
-            if key in self._evidence_keys:
+            key = ",".join(sorted(set(source_urls)))
+            if not key or key in self._evidence_keys:
                 continue
             self._evidence_keys.add(key)
             self._evidence_record_count += 1
@@ -421,13 +423,13 @@ class ProgressDisplay:
         self._emit(
             (
                 f'researcher[{context.index}] "{_truncate(context.topic, 72)}" - '
-                f"{len(evidence_records)} evidence records, {len(domains)} domains ({elapsed})"
+                f"{len(evidence_records)} sources, {len(domains)} domains ({elapsed})"
             ),
             depth=1,
         )
         self._emit(
             (
-                f"Total so far: {self._evidence_record_count} evidence records "
+                f"Total so far: {self._evidence_record_count} sources "
                 f"from {len(self._evidence_domains)} domains"
             ),
             depth=2,
@@ -447,25 +449,6 @@ class ProgressDisplay:
             normalized_domains = {str(domain).strip().lower() for domain in source_domains if str(domain).strip()}
             self._evidence_domains = normalized_domains
         self._evidence_record_count = evidence_count
-
-    def _handle_quality_gate(self, status: str, reason: str, depth: int) -> None:
-        if status == "pass":
-            self._emit(
-                f"Quality gate: {self._evidence_record_count} evidence records, "
-                f"{len(self._evidence_domains)} source domains -> PASS",
-                depth=depth,
-            )
-            return
-
-        if status != "retry":
-            return
-
-        self._emit(
-            f"Quality gate: {self._evidence_record_count} evidence records, "
-            f"{len(self._evidence_domains)} source domains -> RETRY",
-            depth=depth,
-        )
-        self._emit(f"Gate reason: {reason or 'unknown'}", depth=depth + 1)
 
     def _handle_research_unit_summary(self, summary: Mapping[str, Any], depth: int) -> None:
         status = str(summary.get("status", "")).strip().lower()
@@ -555,15 +538,11 @@ class ProgressDisplay:
                 if isinstance(summary, Mapping):
                     self._handle_research_unit_summary(summary, depth)
 
-        quality_gate_status = str(progress.get("quality_gate_status", "none")).strip().lower()
-        quality_gate_reason = str(progress.get("quality_gate_reason") or "")
-        self._handle_quality_gate(quality_gate_status, quality_gate_reason, depth)
-
         wave_elapsed = _format_duration(time.monotonic() - self._wave_started_at.get(wave_index, self._start))
         self._emit(
             (
                 f"Wave {wave_index} complete in {wave_elapsed}: "
-                f"{self._evidence_record_count} evidence records, {len(self._evidence_domains)} domains"
+                f"{self._evidence_record_count} sources, {len(self._evidence_domains)} domains"
             ),
             depth=0,
         )
@@ -593,8 +572,8 @@ class ProgressDisplay:
             self._start_phase("PHASE 3: SYNTHESIS")
             self._emit(
                 (
-                    f"Synthesizing from {self._evidence_record_count} evidence records "
-                    f"and {len(self._evidence_domains)} source domains..."
+                    f"Synthesizing from {self._evidence_record_count} sources "
+                    f"and {len(self._evidence_domains)} domains..."
                 ),
                 depth=1,
             )

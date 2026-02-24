@@ -135,5 +135,5 @@ def test_progress_display_research_summary_uses_extracted_evidence():
     )
 
     rendered = stream.getvalue()
-    assert "1 evidence records, 1 domains" in rendered
-    assert "Total so far: 1 evidence records from 1 domains" in rendered
+    assert "1 sources, 1 domains" in rendered
+    assert "Total so far: 1 sources from 1 domains" in rendered

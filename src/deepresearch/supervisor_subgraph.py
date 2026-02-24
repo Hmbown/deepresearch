@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -41,10 +40,6 @@ from .state import (
 )
 
 _logger = logging.getLogger(__name__)
-# Quality gate minimums — the supervisor cannot declare ResearchComplete until
-# these thresholds are met. Configurable via environment variables.
-_MIN_EVIDENCE_RECORDS_FOR_COMPLETION = int(os.environ.get("MIN_EVIDENCE_RECORDS", "5"))
-_MIN_SOURCE_DOMAINS_FOR_COMPLETION = int(os.environ.get("MIN_SOURCE_DOMAINS", "3"))
 _RECURSION_LIMIT_PATTERN = re.compile(r"Recursion limit of \d+ reached")
 _SUPERVISOR_PROGRESS_EVENT = "supervisor_progress"
 
@@ -120,30 +115,6 @@ def _extract_source_domains(evidence_ledger: list[EvidenceRecord]) -> list[str]:
     return sorted(domains)
 
 
-def _evaluate_research_complete_gate(
-    evidence_ledger: list[EvidenceRecord],
-) -> tuple[bool, str, dict[str, Any]]:
-    record_count = len(evidence_ledger)
-    cited_record_count = sum(1 for record in evidence_ledger if record.source_urls)
-    source_domains = _extract_source_domains(evidence_ledger)
-    gate_fields = {
-        "evidence_record_count": record_count,
-        "cited_record_count": cited_record_count,
-        "source_domain_count": len(source_domains),
-        "source_domains": source_domains,
-        "min_evidence_records_required": _MIN_EVIDENCE_RECORDS_FOR_COMPLETION,
-        "min_source_domains_required": _MIN_SOURCE_DOMAINS_FOR_COMPLETION,
-    }
-
-    if record_count < _MIN_EVIDENCE_RECORDS_FOR_COMPLETION:
-        return False, "insufficient_evidence_records", gate_fields
-    if cited_record_count < _MIN_EVIDENCE_RECORDS_FOR_COMPLETION:
-        return False, "insufficient_cited_evidence", gate_fields
-    if len(source_domains) < _MIN_SOURCE_DOMAINS_FOR_COMPLETION:
-        return False, "insufficient_source_domains", gate_fields
-    return True, "pass", gate_fields
-
-
 def _sanitize_research_unit_failure(exc: Exception) -> str:
     """Return safe error text for tool messages without leaking internals."""
     if isinstance(exc, asyncio.TimeoutError):
@@ -180,20 +151,10 @@ async def supervisor(state: SupervisorState, config: RunnableConfig = None) -> d
     if not supervisor_messages and research_brief:
         supervisor_messages = [HumanMessage(content=research_brief)]
 
-    context_blocks: list[str] = []
-    notes = join_note_list(state.get("notes"))
-    raw_notes = join_note_list(state.get("raw_notes"))
-    if notes:
-        context_blocks.append(f"Compressed notes so far:\n{notes}")
-    if raw_notes:
-        context_blocks.append(f"Raw notes so far:\n{raw_notes}")
-
     model_messages = [
         SystemMessage(content=render_supervisor_prompt(current_date=today_utc_date())),
         *supervisor_messages,
     ]
-    if context_blocks:
-        model_messages.append(HumanMessage(content="\n\n".join(context_blocks)))
 
     model = get_llm("orchestrator")
     if hasattr(model, "bind_tools"):
@@ -490,50 +451,33 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
     )
 
     existing_evidence = normalize_evidence_ledger(state.get("evidence_ledger"))
-    source_domains = _extract_source_domains(existing_evidence)
-    gate_fields = {
-        "evidence_record_count": len(existing_evidence),
-        "cited_record_count": sum(1 for record in existing_evidence if record.source_urls),
-        "source_domain_count": len(source_domains),
-        "source_domains": source_domains,
-    }
 
-    completion_rejection_reason: str | None = None
-    quality_gate_status = "none"
-    completed = False
+    # URL-level deduplication across researchers
+    seen_urls: set[str] = set()
+    deduped_evidence: list[EvidenceRecord] = []
+    for record in existing_evidence:
+        new_urls = [url for url in record.source_urls if url not in seen_urls]
+        if not new_urls and record.source_urls:
+            continue  # all URLs already seen — skip duplicate record
+        seen_urls.update(new_urls)
+        deduped_evidence.append(record)
+    existing_evidence = deduped_evidence
+
+    source_domains = _extract_source_domains(existing_evidence)
+
+    completed = bool(complete_calls)
     tool_messages: list[ToolMessage] = []
     if complete_calls:
-        gate_passed, gate_reason, gate_fields = _evaluate_research_complete_gate(existing_evidence)
-        completed = gate_passed
-        if completed:
-            quality_gate_status = "pass"
-            log_runtime_event(
-                _logger,
-                "supervisor_quality_gate_passed",
-                reason=gate_reason,
-                **gate_fields,
-            )
-        else:
-            quality_gate_status = "retry"
-            completion_rejection_reason = gate_reason
-            log_runtime_event(
-                _logger,
-                "supervisor_quality_gate_failed",
-                reason=gate_reason,
-                **gate_fields,
-            )
-
+        log_runtime_event(
+            _logger,
+            "supervisor_research_complete",
+            evidence_record_count=len(existing_evidence),
+            source_domain_count=len(source_domains),
+        )
         for index, call in enumerate(complete_calls):
-            if completed:
-                content = "[ResearchComplete received]"
-            else:
-                content = (
-                    "[ResearchComplete rejected: evidence quality gate failed "
-                    f"(reason={completion_rejection_reason or 'unknown'})]"
-                )
             tool_messages.append(
                 ToolMessage(
-                    content=content,
+                    content="[ResearchComplete received]",
                     name=ResearchComplete.__name__,
                     tool_call_id=str(call.get("id") or f"supervisor_complete_{index}"),
                 )
@@ -563,11 +507,9 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
         "remaining_iterations": remaining_iterations,
         "max_concurrent_research_units": get_max_concurrent_research_units(),
         "max_researcher_iterations": max_researcher_iterations,
-        "quality_gate_status": quality_gate_status,
-        "quality_gate_reason": completion_rejection_reason,
-        "evidence_record_count": gate_fields["evidence_record_count"],
-        "source_domain_count": gate_fields["source_domain_count"],
-        "source_domains": gate_fields["source_domains"],
+        "evidence_record_count": len(existing_evidence),
+        "source_domain_count": len(source_domains),
+        "source_domains": sorted(source_domains),
         "planned_research_units": [
             {
                 "call_id": str(call.get("id") or ""),

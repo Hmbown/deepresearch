@@ -41,11 +41,10 @@ def test_extract_research_from_messages_emits_typed_evidence_records():
     assert raw_notes
     assert evidence_ledger
     assert any(record.source_urls for record in evidence_ledger)
-    assert all(0.0 <= record.confidence <= 1.0 for record in evidence_ledger)
-    assert any(record.contradiction_or_uncertainty for record in evidence_ledger)
 
 
-def test_supervisor_quality_gate_rejects_research_complete_without_evidence(monkeypatch):
+def test_supervisor_finalize_always_accepts_research_complete(monkeypatch):
+    """ResearchComplete is always accepted — no quality gate."""
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
     monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 6)
 
@@ -62,67 +61,12 @@ def test_supervisor_quality_gate_rejects_research_complete_without_evidence(monk
     }
 
     result = asyncio.run(supervisor_subgraph.supervisor_finalize(state))
-    assert result["research_iterations"] == 3
-    assert any("ResearchComplete rejected" in msg.content for msg in result["supervisor_messages"])
-    assert any("insufficient_evidence_records" in msg.content for msg in result["supervisor_messages"])
-
-
-def test_supervisor_quality_gate_accepts_research_complete_with_sufficient_evidence(monkeypatch):
-    supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    monkeypatch.setattr(supervisor_subgraph, "get_max_researcher_iterations", lambda: 6)
-    monkeypatch.setattr(supervisor_subgraph, "_MIN_EVIDENCE_RECORDS_FOR_COMPLETION", 5)
-    monkeypatch.setattr(supervisor_subgraph, "_MIN_SOURCE_DOMAINS_FOR_COMPLETION", 3)
-
-    state = {
-        "pending_complete_calls": [{"id": "complete-1"}],
-        "pending_requested_research_units": 0,
-        "pending_dispatched_research_units": 0,
-        "pending_skipped_research_units": 0,
-        "pending_remaining_iterations": 4,
-        "research_unit_summaries": [],
-        "research_unit_summaries_consumed": 0,
-        "evidence_ledger": [
-            {
-                "claim": "Claim one [1].",
-                "source_urls": ["https://example.com/a"],
-                "confidence": 0.8,
-                "contradiction_or_uncertainty": None,
-            },
-            {
-                "claim": "Claim two [2].",
-                "source_urls": ["https://example.org/b"],
-                "confidence": 0.7,
-                "contradiction_or_uncertainty": "Evidence is mixed across regions.",
-            },
-            {
-                "claim": "Claim three [3].",
-                "source_urls": ["https://example.net/c"],
-                "confidence": 0.9,
-                "contradiction_or_uncertainty": None,
-            },
-            {
-                "claim": "Claim four [4].",
-                "source_urls": ["https://example.com/d"],
-                "confidence": 0.8,
-                "contradiction_or_uncertainty": None,
-            },
-            {
-                "claim": "Claim five [5].",
-                "source_urls": ["https://example.org/e"],
-                "confidence": 0.75,
-                "contradiction_or_uncertainty": None,
-            },
-        ],
-        "research_iterations": 2,
-    }
-
-    result = asyncio.run(supervisor_subgraph.supervisor_finalize(state))
     assert result["research_iterations"] == 6
     assert any("ResearchComplete received" in msg.content for msg in result["supervisor_messages"])
 
 
-def test_extract_evidence_records_handles_dash_prefixed_citation_urls():
-    """Verify citation map parses '- [N] URL' and '[N]: URL' formats."""
+def test_extract_evidence_records_extracts_unique_urls():
+    """Evidence extraction returns one record per unique URL."""
     from deepresearch.researcher_subgraph import _extract_evidence_records
 
     text = (
@@ -131,74 +75,48 @@ def test_extract_evidence_records_handles_dash_prefixed_citation_urls():
         "- Battery costs fell below $100/kWh [2].\n\n"
         "Sources:\n"
         "- [1] https://example.com/renewables-report\n"
-        "[2]: https://example.org/battery-costs"
+        "[2]: https://example.org/battery-costs\n"
+        "Also see https://example.com/renewables-report for details."
     )
     records = _extract_evidence_records(text)
     assert records
     urls_found = [url for r in records for url in r.source_urls]
     assert "https://example.com/renewables-report" in urls_found
     assert "https://example.org/battery-costs" in urls_found
+    # Duplicate URL should not create a second record
+    assert len([u for u in urls_found if u == "https://example.com/renewables-report"]) == 1
 
 
-def test_extract_evidence_records_multi_url_fallback_links_cited_claims():
-    """Claims with citation markers get global URLs when citation map has gaps."""
+def test_extract_evidence_records_deduplicates_urls():
+    """Duplicate URLs across the text produce only one record each."""
     from deepresearch.researcher_subgraph import _extract_evidence_records
 
     text = (
-        "Executive Summary\n"
-        "The market expanded significantly in 2025 [1].\n"
-        "Competition intensified among top players [2].\n\n"
-        "Evidence Log\n"
-        "- Market share data confirms growth trajectory [1].\n"
-        "- Strategic pivots were noted across the sector [2].\n\n"
-        "https://example.com/market-data\n"
-        "https://example.org/strategy-report\n"
+        "First mention: https://example.com/a\n"
+        "Second mention: https://example.com/a\n"
+        "Different URL: https://example.org/b\n"
     )
-    records = _extract_evidence_records(text)
-    assert records
-    cited_records = [r for r in records if r.source_urls]
-    assert len(cited_records) >= 1, "Claims with citation markers should get fallback URLs"
-
-
-def test_extract_evidence_records_source_section_bare_url_lines_excluded():
-    """Source section lines that are bare URLs should not leak into claim lines."""
-    from deepresearch.researcher_subgraph import _extract_evidence_records
-
-    text = (
-        "Key Findings\n"
-        "- Important finding with evidence [1].\n\n"
-        "Sources:\n"
-        "- https://example.com/source-a\n"
-        "- https://example.org/source-b\n"
-    )
-    records = _extract_evidence_records(text)
-    # Source URL lines should not appear as claim records
-    claim_texts = [r.claim for r in records]
-    assert not any("https://example.com/source-a" == c for c in claim_texts)
-    assert not any("https://example.org/source-b" == c for c in claim_texts)
-
-
-def test_extract_evidence_records_respects_max_claims_per_research_unit(monkeypatch):
-    """Evidence parsing should enforce the configured per-research-unit claim cap."""
-    from deepresearch.researcher_subgraph import _extract_evidence_records
-
-    monkeypatch.setenv("MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT", "2")
-
-    text = (
-        "Key Findings\n"
-        "- First detailed finding about market access, backed by internal reports [1].\n"
-        "- Second detailed finding with revenue context and updated guidance [2].\n"
-        "- Third detailed finding with margin expansion trend in 2025 [3].\n"
-        "- Fourth detailed finding around valuation and demand [4].\n"
-        "Sources:\n"
-        "[1] https://example.com/alpha\n"
-        "[2] https://example.org/beta\n"
-        "[3] https://example.net/gamma\n"
-        "[4] https://example.io/delta\n"
-    )
-
     records = _extract_evidence_records(text)
     assert len(records) == 2
+    all_urls = [url for r in records for url in r.source_urls]
+    assert "https://example.com/a" in all_urls
+    assert "https://example.org/b" in all_urls
+
+
+def test_extract_evidence_records_empty_text():
+    """Empty input returns no records."""
+    from deepresearch.researcher_subgraph import _extract_evidence_records
+
+    assert _extract_evidence_records("") == []
+    assert _extract_evidence_records("   ") == []
+
+
+def test_extract_evidence_records_no_urls():
+    """Text without URLs returns no records."""
+    from deepresearch.researcher_subgraph import _extract_evidence_records
+
+    records = _extract_evidence_records("Just some plain text without any links.")
+    assert records == []
 
 
 def test_final_report_generation_preserves_evidence_ledger_source_transparency():
@@ -210,10 +128,7 @@ def test_final_report_generation_preserves_evidence_ledger_source_transparency()
                 "raw_notes": [],
                 "evidence_ledger": [
                     {
-                        "claim": "Claim one.",
                         "source_urls": ["https://example.com/a"],
-                        "confidence": 0.8,
-                        "contradiction_or_uncertainty": None,
                     }
                 ],
                 "final_report": "Synthesis from typed evidence.",

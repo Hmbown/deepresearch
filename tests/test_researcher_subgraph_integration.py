@@ -110,8 +110,8 @@ def test_extract_research_from_messages_excludes_think_tool():
         HumanMessage(content="test topic"),
         AIMessage(content="searching..."),
         ToolMessage(content="Reflection recorded: evaluating", name=think_tool.name, tool_call_id="t1"),
-        ToolMessage(content="Real search result [1]", name="search_web", tool_call_id="t2"),
-        AIMessage(content="Final synthesis [1]"),
+        ToolMessage(content="Real search result from https://example.com/result", name="search_web", tool_call_id="t2"),
+        AIMessage(content="Final synthesis with source https://example.com/result"),
     ]
 
     compressed, raw_notes, evidence_ledger = extract_research_from_messages({"messages": messages})

@@ -300,16 +300,10 @@ def test_persisted_thread_evidence_ledger_continuity(monkeypatch):
                 "raw_notes": ["raw with evidence https://example.com/evidence-a"],
                 "evidence_ledger": [
                     {
-                        "claim": "Evidence claim [1].",
                         "source_urls": ["https://example.com/evidence-a"],
-                        "confidence": 0.8,
-                        "contradiction_or_uncertainty": None,
                     },
                     {
-                        "claim": "Second claim [2].",
                         "source_urls": ["https://example.org/evidence-b"],
-                        "confidence": 0.7,
-                        "contradiction_or_uncertainty": "Mixed findings across regions.",
                     },
                 ],
             }
@@ -337,7 +331,6 @@ def test_persisted_thread_evidence_ledger_continuity(monkeypatch):
     assert result["intake_decision"] == "proceed"
     assert normalized_evidence
     assert any(r.source_urls for r in normalized_evidence)
-    assert any(r.contradiction_or_uncertainty for r in normalized_evidence)
     assert "Sources:" in result["final_report"]
 
 

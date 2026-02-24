@@ -95,6 +95,8 @@ def test_search_preprocessing_is_deterministic_and_llm_free():
     first_output = asyncio.run(search_tool.ainvoke({"query": "test"}))
     second_output = asyncio.run(search_tool.ainvoke({"query": "test"}))
     assert first_output == second_output
+    # Deterministic sorting should place URL-bearing sources in lexical URL order.
+    assert first_output.index("URL: https://a.example") < first_output.index("URL: https://b.example")
 
     last_metric = metrics[-1]
     assert last_metric["event"] == "search_preprocess"
@@ -229,7 +231,7 @@ def test_fetch_url_truncates_long_content():
     events: list[dict] = []
     fetch_tool = nodes._build_fetch_url_tool(events.append)
 
-    long_text = "A" * 20000
+    long_text = "A" * 25000
     html = f"<html><body><p>{long_text}</p></body></html>"
     mock_response = AsyncMock()
     mock_response.status_code = 200
@@ -246,4 +248,4 @@ def test_fetch_url_truncates_long_content():
         result = asyncio.run(fetch_tool.ainvoke({"url": "https://example.com/long"}))
 
     assert result.endswith("...[content truncated]")
-    assert len(result) < 8100
+    assert len(result) < 20100
