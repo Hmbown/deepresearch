@@ -374,3 +374,31 @@ Two new env-configurable knobs added to `config.py`:
 - Section 11 table in this doc should be updated to include `MAX_EVIDENCE_CLAIMS_PER_RESEARCH_UNIT` and `MAX_SOURCE_URLS_PER_CLAIM` rows and correct `MAX_CONCURRENT_RESEARCH_UNITS` default from 6 to 4 — deferred to next doc pass.
 - No integration test yet that exercises both caps simultaneously in a live researcher run (unit tests cover the extraction logic in isolation).
 - The claim cap default of 5 is conservative; may need tuning upward once live output quality is assessed.
+
+### 2026-02-24 — Fix intake clarification: batch questions, cap plan tracks
+
+**Problem (observed in live run):** User asked about US bankruptcy-risk companies. The system asked one clarification question ("US or worldwide?"), got the answer "US", then instead of asking remaining scope questions (public vs private? top N? sector segmentation?), it proceeded to the plan and embedded those unresolved questions as research track #1: "Clarify the company universe and return size." That's backwards — clarification should happen during clarification, not during research. Additionally the plan showed 7 research tracks even though `MAX_CONCURRENT_RESEARCH_UNITS=4`.
+
+**What changed:**
+
+1. **CLARIFY_PROMPT** (`prompts.py`): Removed "one question only" / "never ask more than one" language. New behavior: ask up to 3 scope-narrowing questions bundled in a single message so the user can answer them all at once. Explicitly tells the model not to push unresolved scope questions into research tracks.
+
+2. **ClarifyWithUser schema** (`state.py`): Field description updated from "Single conversational clarification question" to "Up to 3 conversational scope-narrowing questions bundled in a single message."
+
+3. **RESEARCH_PLAN_PROMPT** (`prompts.py`): Now accepts `{max_research_tracks}` format key (bound to `MAX_CONCURRENT_RESEARCH_UNITS` at call time). Tells the model to merge related angles and not include scope-clarification tracks.
+
+4. **`_generate_research_plan`** (`intake.py`): Passes `max_research_tracks=get_max_concurrent_research_units()` to the plan prompt format call.
+
+5. **ResearchPlan.research_tracks** (`state.py`): Field description updated to discourage scope-clarification tracks and encourage merging.
+
+6. **Tests** (`test_prompts_contract.py`): Updated plan prompt render calls to include `max_research_tracks` key.
+
+**Architecture:** No new files, no new abstractions, no structural changes. Prompt wording + one new format key + schema description updates.
+
+**Test results:** 174/174 passed, 1 skipped. CLI verified.
+
+**Deployment status:** Committed and pushed to `main`.
+
+**Remaining risks / next steps:**
+- Prompt changes are soft guidance — the model may still under-ask or over-track depending on the query. Need to observe behavior on a few real runs.
+- No hard enforcement that track count <= `MAX_CONCURRENT_RESEARCH_UNITS` — it's prompt-level only. Could add a Python-side truncation in `_format_plan_message` if the model ignores the cap.

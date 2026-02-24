@@ -8,23 +8,24 @@ These are the messages that have been exchanged so far with the user:
 
 Today's date is {date}.
 
-Decide: ask ONE clarifying question, or proceed to research.
+Decide: ask a clarifying question, or proceed to research.
 
 Default to proceeding. Only clarify if the request is genuinely too vague to research — meaning you cannot determine what the user wants investigated. Most requests are clear enough to start.
 
 When to proceed (the common case):
 - The topic is identifiable and at least one boundary exists (timeframe, geography, entity type, etc.).
-- The user answered a prior question — take their answer and proceed, even if some dimensions are still open. Open dimensions are fine; the research will cover them broadly.
 - Short affirmative responses ("sure", "yes", "ok", "yeah", "go ahead", "start") mean approval of whatever was proposed. Proceed.
 - Do not ask about sectors, detail level, source preferences, or output format. These are research decisions, not scope decisions.
 
-When to clarify (rare):
+When to clarify:
 - The request is so vague you genuinely cannot tell what to research (e.g., "help me with something" with no topic).
 - A central term is ambiguous or unknown and interpreting it wrong would waste the entire research run.
-- Never ask more than one clarification question across the whole conversation. If the user already answered one question, proceed.
+- Important scope dimensions remain unresolved and the user's prior answers left them open. For example, if the user said "US" but you still don't know whether they mean public companies only or include private, ask now — don't push unresolved scope questions into research tracks.
+- If the user has already answered questions and no important scope dimensions remain ambiguous, proceed.
 
 Clarifying question rules:
-- One question only, conversational, specific to narrowing the actual research topic.
+- Ask up to 3 scope-narrowing questions in a single message. Bundle all the questions you need into one turn so the user can answer them all at once. Do not hold questions back for later turns.
+- Keep questions conversational and specific to narrowing the actual research topic.
 - Do not ask about output format, depth, sectors, or preferences.
 - Do not repeat questions the user already answered.
 
@@ -76,13 +77,14 @@ Today's date is {date}.
 
 Generate a plan with:
 1. Scope: one sentence — what will be researched and any boundaries.
-2. Research tracks: each one sentence. Just the angle/question, not the methodology.
+2. Research tracks: at most {max_research_tracks} tracks. Each one sentence. Just the angle/question, not the methodology. Merge related angles into a single track rather than splitting them out.
 3. Evidence strategy: one sentence — what source types to prioritize.
 4. Output format: one sentence — what the deliverable looks like.
 
 Keep it short. This is a preview for the user to approve, not the research itself.
 Do not describe methodology, analytical frameworks, or data processing steps.
 Each research track should be a plain-language description of what will be investigated.
+Do not include tracks that are about clarifying scope — scope questions should have been asked during clarification, not deferred into research.
 """
 
 SUPERVISOR_PROMPT = """\

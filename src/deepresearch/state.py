@@ -222,10 +222,10 @@ class ClarifyWithUser(BaseModel):
     """Structured decision for whether a clarification turn is needed."""
 
     need_clarification: bool = Field(
-        description="Whether the user should be asked one clarification question before research.",
+        description="Whether the user should be asked clarification questions before research.",
     )
     question: str = Field(
-        description="Single conversational clarification question when clarification is required.",
+        description="Up to 3 conversational scope-narrowing questions bundled in a single message. Ask everything you need in one turn so the user can answer all at once.",
     )
     verification: str = Field(
         description="Acknowledgement message that research is starting when clarification is not required.",
@@ -245,7 +245,7 @@ class ResearchPlan(BaseModel):
 
     scope: str = Field(description="One sentence: what will be researched and any boundaries.")
     research_tracks: list[str] = Field(
-        description="Research tracks to investigate. Each track is ONE sentence describing the angle, not the methodology.",
+        description="Research tracks to investigate. Each track is ONE sentence describing the angle, not the methodology. Merge related angles rather than splitting. Do not include scope-clarification tracks.",
     )
     evidence_strategy: str = Field(
         description="One sentence: what source types to prioritize.",

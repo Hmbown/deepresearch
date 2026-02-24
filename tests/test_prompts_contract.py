@@ -67,7 +67,8 @@ def test_final_report_prompt_has_required_placeholders():
 def test_research_plan_prompt_has_required_placeholders():
     assert "{research_brief}" in prompts.RESEARCH_PLAN_PROMPT
     assert "{date}" in prompts.RESEARCH_PLAN_PROMPT
-    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date="2026-02-24")
+    assert "{max_research_tracks}" in prompts.RESEARCH_PLAN_PROMPT
+    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date="2026-02-24", max_research_tracks=4)
 
 
 def test_prompt_templates_render_with_expected_keys_and_fail_closed_on_missing_fields():
@@ -83,7 +84,7 @@ def test_prompt_templates_render_with_expected_keys_and_fail_closed_on_missing_f
         max_react_tool_calls=10,
     )
     assert prompts.FINAL_REPORT_PROMPT.format(current_date="2026-02-23", final_report_max_sections=8)
-    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date="2026-02-24")
+    assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date="2026-02-24", max_research_tracks=4)
 
     with pytest.raises(KeyError):
         prompts.CLARIFY_PROMPT.format(messages="m")

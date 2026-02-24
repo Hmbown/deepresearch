@@ -11,7 +11,7 @@ from langchain_core.runnables.config import RunnableConfig
 from langgraph.graph import END
 from langgraph.types import Command
 
-from .config import get_llm, get_max_structured_output_retries
+from .config import get_llm, get_max_concurrent_research_units, get_max_structured_output_retries
 from .prompts import CLARIFY_PROMPT, RESEARCH_BRIEF_PROMPT, RESEARCH_PLAN_PROMPT
 from .runtime_utils import invoke_structured_with_retries
 from .state import (
@@ -86,6 +86,7 @@ async def _generate_research_plan(
     prompt_content = RESEARCH_PLAN_PROMPT.format(
         research_brief=research_brief,
         date=today_utc_date(),
+        max_research_tracks=get_max_concurrent_research_units(),
     )
     return await invoke_structured_with_retries(
         structured_model,
