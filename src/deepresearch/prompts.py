@@ -158,16 +158,6 @@ Citation rules:
 - End with a Sources subsection under Evidence Log listing each cited URL once.
 """
 
-COMPRESSION_PROMPT = """\
-Compression policy for supervisor notes:
-- Convert raw_notes into high-signal notes suitable for final synthesis.
-- Keep at most {notes_max_bullets} bullets.
-- Keep compressed notes under {notes_word_budget} words total.
-- Preserve citation markers [1], [2], ... where evidence exists.
-- Keep contradictions and unresolved questions explicit.
-- Do not introduce claims absent from raw_notes.
-"""
-
 FINAL_REPORT_PROMPT = """\
 Final report policy:
 - Treat compressed notes as the primary synthesis source.

@@ -67,9 +67,7 @@ def test_researcher_prompt_preserves_research_quality_contract():
         assert token in prompts.RESEARCHER_PROMPT
 
 
-def test_compression_and_final_report_prompts_have_required_placeholders():
-    assert "{notes_max_bullets}" in prompts.COMPRESSION_PROMPT
-    assert "{notes_word_budget}" in prompts.COMPRESSION_PROMPT
+def test_final_report_prompt_has_required_placeholders():
     assert "{current_date}" in prompts.FINAL_REPORT_PROMPT
     assert "{final_report_max_sections}" in prompts.FINAL_REPORT_PROMPT
 
@@ -86,7 +84,6 @@ def test_prompt_templates_render_with_expected_keys_and_fail_closed_on_missing_f
         researcher_search_budget=8,
         max_react_tool_calls=10,
     )
-    assert prompts.COMPRESSION_PROMPT.format(notes_max_bullets=8, notes_word_budget=250)
     assert prompts.FINAL_REPORT_PROMPT.format(current_date="2026-02-23", final_report_max_sections=8)
 
     with pytest.raises(KeyError):

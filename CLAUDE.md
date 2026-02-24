@@ -48,7 +48,7 @@ Runtime is a native LangGraph graph (intake → supervisor → report) with the 
 - Supervisor subgraph: hand-built LangGraph loop that dispatches `ConductResearch` tool calls.
 - Researcher subgraph: `build_researcher_subgraph()` returns a `create_deep_agent()` compiled graph.
   - Accepts `{"messages": [HumanMessage(content=topic)]}` and returns `MessagesState`.
-  - Built-in middleware: `SummarizationMiddleware`, `FilesystemMiddleware`, `PatchToolCallsMiddleware`, `TodoListMiddleware`, `AnthropicPromptCachingMiddleware`.
+  - Built-in middleware provided by `deepagents` (summarization, tool-call patching, etc.).
   - Uses the project's existing research tools (`search_web`, `fetch_url`, `think_tool`).
   - Post-processed via `extract_research_from_messages()` to produce compressed notes.
 
