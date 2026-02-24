@@ -1,9 +1,16 @@
 import io
 from types import SimpleNamespace
 
-from langchain_core.messages import ToolMessage
-
 from deepresearch import cli
+
+
+def _researcher_chain_start_event(topic: str) -> dict[str, object]:
+    return {
+        "event": "on_chain_start",
+        "name": "LangGraph",
+        "metadata": {"checkpoint_ns": "researcher|1"},
+        "data": {"input": {"messages": [SimpleNamespace(type="human", content=topic)]}},
+    }
 
 
 def test_collect_evidence_from_research_output_uses_message_extraction():
@@ -54,14 +61,14 @@ def test_progress_display_finishes_only_for_top_level_langgraph_event():
 def test_progress_display_summarizes_recursion_limit_without_raw_error_url():
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
-    display._topic_queue.append("Counter-UAS integration updates")
+    display.handle_event(_researcher_chain_start_event("Counter-UAS integration updates"))
 
     display.handle_event(
         {
             "event": "on_chain_start",
-            "name": "LangGraph",
-            "metadata": {"checkpoint_ns": "researcher|1"},
-            "data": {},
+            "name": "supervisor_tools",
+            "metadata": {"checkpoint_ns": "research_supervisor|tools"},
+            "data": {"input": {}},
         }
     )
 
@@ -72,17 +79,28 @@ def test_progress_display_summarizes_recursion_limit_without_raw_error_url():
             "metadata": {"checkpoint_ns": "research_supervisor|tools"},
             "data": {
                 "output": {
-                    "supervisor_messages": [
-                        ToolMessage(
-                            content=(
-                                "[Research unit failed: Recursion limit of 41 reached without hitting a stop "
-                                "condition. For troubleshooting, visit: "
-                                "https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT]"
-                            ),
-                            name="ConductResearch",
-                            tool_call_id="call-1",
-                        )
-                    ]
+                    "runtime_progress": {
+                        "supervisor_iteration": 1,
+                        "requested_research_units": 1,
+                        "dispatched_research_units": 1,
+                        "skipped_research_units": 0,
+                        "remaining_iterations": 15,
+                        "max_concurrent_research_units": 6,
+                        "max_researcher_iterations": 16,
+                        "quality_gate_status": "none",
+                        "quality_gate_reason": "",
+                        "evidence_record_count": 0,
+                        "source_domain_count": 0,
+                        "source_domains": [],
+                        "research_units": [
+                            {
+                                "topic": "Counter-UAS integration updates",
+                                "status": "failed",
+                                "failure_reason": "Recursion limit of 41 reached",
+                                "duration_seconds": 2.1,
+                            }
+                        ],
+                    }
                 }
             },
         }
@@ -96,16 +114,7 @@ def test_progress_display_summarizes_recursion_limit_without_raw_error_url():
 def test_progress_display_research_summary_uses_extracted_evidence():
     stream = io.StringIO()
     display = cli.ProgressDisplay(stream=stream)
-    display._topic_queue.append("Autonomous maritime systems")
-
-    display.handle_event(
-        {
-            "event": "on_chain_start",
-            "name": "LangGraph",
-            "metadata": {"checkpoint_ns": "researcher|1"},
-            "data": {},
-        }
-    )
+    display.handle_event(_researcher_chain_start_event("Autonomous maritime systems"))
     display.handle_event(
         {
             "event": "on_chain_end",

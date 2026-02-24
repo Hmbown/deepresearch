@@ -63,6 +63,8 @@ def test_supervisor_quality_gate_rejects_research_complete_without_evidence(monk
     result = asyncio.run(graph.supervisor_tools(state))
     assert result["research_iterations"] == 3
     assert any("ResearchComplete rejected" in msg.content for msg in result["supervisor_messages"])
+    assert result["runtime_progress"]["quality_gate_status"] == "retry"
+    assert result["runtime_progress"]["quality_gate_reason"] == "insufficient_evidence_records"
 
 
 def test_supervisor_quality_gate_accepts_research_complete_with_sufficient_evidence(monkeypatch):
@@ -96,6 +98,8 @@ def test_supervisor_quality_gate_accepts_research_complete_with_sufficient_evide
     result = asyncio.run(graph.supervisor_tools(state))
     assert result["research_iterations"] == 6
     assert any("ResearchComplete received" in msg.content for msg in result["supervisor_messages"])
+    assert result["runtime_progress"]["quality_gate_status"] == "pass"
+    assert result["runtime_progress"]["source_domain_count"] == 2
 
 
 def test_extract_evidence_records_handles_dash_prefixed_citation_urls():

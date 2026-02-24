@@ -169,6 +169,7 @@ def test_runtime_preflight_allows_process_env_without_dotenv(monkeypatch, tmp_pa
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
     monkeypatch.setenv("SEARCH_PROVIDER", "none")
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
+    monkeypatch.setattr(env, "_dependency_available", lambda _: True)
 
     ok, checks = env.runtime_preflight(project_name="deepresearch")
 

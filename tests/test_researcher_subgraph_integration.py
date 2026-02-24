@@ -133,3 +133,10 @@ def test_extract_research_from_messages_empty():
     assert compressed is None
     assert raw_notes == []
     assert evidence_ledger == []
+
+
+def test_render_researcher_prompt_no_search_mode_omits_search_tool_contract():
+    prompt = researcher_subgraph.render_researcher_prompt(search_enabled=False)
+
+    assert "search_web is unavailable in this run" in prompt
+    assert "Do not attempt search_web calls." in prompt

@@ -87,6 +87,10 @@ def test_scope_intake_runs_intake_on_first_turn(monkeypatch):
     )
 
     assert command.goto == "__end__"
+    assert command.update["intake_decision"] == "clarify"
+    assert command.update["awaiting_clarification"] is True
+    assert len(command.update["messages"]) == 1
+    assert "battery segment" in command.update["messages"][0].content.lower()
     assert llm.structured_calls
 
 
@@ -555,6 +559,11 @@ def test_supervisor_tools_runs_parallel_research_and_enforces_cap(monkeypatch):
     assert result["raw_notes"]
     assert any("finding [1]" in note for note in result["notes"])
     assert any("skipped" in message.content for message in result["supervisor_messages"])
+    runtime_progress = result["runtime_progress"]
+    assert runtime_progress["requested_research_units"] == 2
+    assert runtime_progress["dispatched_research_units"] == 1
+    assert runtime_progress["skipped_research_units"] == 1
+    assert runtime_progress["quality_gate_status"] == "none"
     assert researcher_graph.ainvoke.await_count == 1
 
 
@@ -593,6 +602,10 @@ def test_supervisor_tools_marks_completion_when_research_complete_called(monkeyp
     result = asyncio.run(graph.supervisor_tools(state))
     assert result["research_iterations"] == 6
     assert any("ResearchComplete received" in msg.content for msg in result["supervisor_messages"])
+    runtime_progress = result["runtime_progress"]
+    assert runtime_progress["quality_gate_status"] == "pass"
+    assert runtime_progress["evidence_record_count"] == 2
+    assert runtime_progress["source_domain_count"] == 2
 
 
 def test_final_report_generation_uses_model_output(monkeypatch):

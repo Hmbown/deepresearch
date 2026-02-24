@@ -272,11 +272,23 @@ def test_callback_handler_skips_non_root_runs():
 
 def test_callback_handler_fires_for_root_runs():
     handler = OnlineEvalCallbackHandler(client=MagicMock())
-    with patch.object(handler, "_run_eval_sync") as mock_eval:
+    with patch.object(handler, "_run_eval_sync") as mock_eval, patch(
+        "deepresearch.evals.callback.threading.Thread"
+    ) as mock_thread:
+
+        class _InlineThread:
+            def __init__(self, *, target, args, daemon):
+                self._target = target
+                self._args = args
+                self.daemon = daemon
+
+            def start(self):
+                self._target(*self._args)
+
+        mock_thread.side_effect = _InlineThread
         handler.on_chain_end({}, run_id="run-1", parent_run_id=None)
-        # Give the thread a moment to start
-        import time
-        time.sleep(0.1)
+
+        mock_thread.assert_called_once()
         mock_eval.assert_called_once_with("run-1")
 
 

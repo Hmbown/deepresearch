@@ -10,20 +10,19 @@ import time
 import webbrowser
 import warnings
 import uuid
-from collections import deque
 from dataclasses import dataclass
 from getpass import getpass
 from typing import Any
 from urllib.parse import urlparse
 from collections.abc import Mapping
 
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 
-from .config import get_max_concurrent_research_units, get_max_researcher_iterations, online_evals_enabled
+from .config import online_evals_enabled
 from .env import ensure_runtime_env_ready, project_dotenv_path, runtime_preflight, update_project_dotenv
 from .message_utils import extract_text_content as _extract_text_content
 from .researcher_subgraph import extract_research_from_messages
-from .state import latest_ai_message, extract_tool_calls, normalize_evidence_ledger
+from .state import normalize_evidence_ledger
 
 _TOOL_EVENT_TYPES = {
     "on_tool_start",
@@ -42,7 +41,6 @@ _PRIMARY_NODE_NAMES = {
 
 _SEARCH_SOURCE_RE = re.compile(r"^\[Source\s+(\d+)\]", re.MULTILINE)
 _SEARCH_URL_RE = re.compile(r"^URL:\s*(.+)$", re.MULTILINE)
-_RESEARCH_COMPLETE_RE = re.compile(r"\[ResearchComplete rejected: evidence quality gate failed \(reason=([^\)]+)\)\]")
 _RECURSION_LIMIT_RE = re.compile(r"Recursion limit of (\d+) reached")
 
 
@@ -180,57 +178,11 @@ def _format_domain_list(domains: list[str], max_items: int = 3) -> str:
     return f"{', '.join(domains[:max_items])}, ..."
 
 
-def _extract_research_topics_from_supervisor_input(input_payload: Mapping[str, Any] | None) -> list[str]:
-    if not isinstance(input_payload, Mapping):
-        return []
-
-    raw_messages = input_payload.get("supervisor_messages")
-    if isinstance(raw_messages, tuple):
-        messages = list(raw_messages)
-    elif isinstance(raw_messages, list):
-        messages = raw_messages
-    else:
-        return []
-
-    latest_ai = latest_ai_message(messages)
-    if latest_ai is None:
-        return []
-
-    topics: list[str] = []
-    for tool_call in extract_tool_calls(latest_ai):
-        if tool_call.get("name") != "ConductResearch":
-            continue
-        args = tool_call.get("args")
-        topic = _extract_query_arg(args, "research_topic")
-        topics.append(topic or "[missing research topic]")
-    return topics
-
-
-def _extract_tool_message_summary(message: ToolMessage) -> tuple[str, str]:
-    content = _extract_text_content(getattr(message, "content", "")).strip()
-    if not content:
-        return "", ""
-
-    if "[ResearchComplete received]" in content:
-        return ("research_complete_received", "")
-
-    match = _RESEARCH_COMPLETE_RE.search(content)
-    if match:
-        return ("research_complete_rejected", match.group(1).strip())
-
-    if content.startswith("[Research unit failed:"):
-        return ("research_unit_failed", content)
-
-    if content == "[Research unit returned no notes]":
-        return ("research_unit_empty", "")
-
-    if content.startswith("[ConductResearch missing research_topic]"):
-        return ("research_unit_missing_topic", "")
-
-    if content.startswith("[ConductResearch skipped:"):
-        return ("research_unit_skipped", content)
-
-    return ("other", content)
+def _extract_runtime_progress_payload(output: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(output, Mapping):
+        return {}
+    payload = output.get("runtime_progress")
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 
 def _collect_evidence_from_research_output(output: Mapping[str, Any] | None) -> tuple[list[Any], list[str]]:
@@ -263,23 +215,6 @@ def _collect_evidence_from_research_output(output: Mapping[str, Any] | None) -> 
     return evidence_records, source_urls
 
 
-def _extract_wave_dispatch_plan(input_payload: Mapping[str, Any] | None) -> tuple[list[str], int, int]:
-    topics = _extract_research_topics_from_supervisor_input(input_payload)
-    if not topics:
-        return [], 0, 0
-
-    research_iterations = 0
-    if isinstance(input_payload, Mapping):
-        try:
-            research_iterations = int(input_payload.get("research_iterations", 0) or 0)
-        except Exception:
-            research_iterations = 0
-
-    remaining_iterations = max(0, get_max_researcher_iterations() - research_iterations)
-    dispatch_count = min(len(topics), get_max_concurrent_research_units(), remaining_iterations)
-    return topics[:dispatch_count], len(topics), dispatch_count
-
-
 def _collect_domains(records: list[Any]) -> set[str]:
     domains: set[str] = set()
     for record in records:
@@ -288,6 +223,34 @@ def _collect_domains(records: list[Any]) -> set[str]:
             if domain:
                 domains.add(domain)
     return domains
+
+
+def _extract_topic_from_research_chain_input(data: Mapping[str, Any] | None) -> str:
+    if not isinstance(data, Mapping):
+        return ""
+    payload = data.get("input")
+    if not isinstance(payload, Mapping):
+        return ""
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return ""
+
+    for message in reversed(messages):
+        if isinstance(message, Mapping):
+            message_type = str(message.get("type", "")).lower()
+            if message_type not in {"human", "user"}:
+                continue
+            content = _extract_text_content(message.get("content", "")).strip()
+            if content:
+                return content
+            continue
+
+        if getattr(message, "type", "") != "human":
+            continue
+        content = _extract_text_content(getattr(message, "content", "")).strip()
+        if content:
+            return content
+    return ""
 
 
 class ProgressDisplay:
@@ -300,7 +263,6 @@ class ProgressDisplay:
 
         self._start = time.monotonic()
         self._next_research_unit = 1
-        self._topic_queue: deque[str] = deque()
         self._active_research: dict[str, _ResearchUnitContext] = {}
 
         self._evidence_keys: set[str] = set()
@@ -311,10 +273,9 @@ class ProgressDisplay:
         self._phase_started_at: dict[str, float] = {}
         self._research_wave = 0
         self._active_wave = 0
-        self._wave_dispatch_count = 0
-        self._wave_requested_count = 0
         self._wave_started_at: dict[int, float] = {}
         self._pipeline_finished = False
+        self._last_top_level_output: dict[str, Any] = {}
 
     def _depth(self, metadata: Mapping[str, Any] | None) -> int:
         if not isinstance(metadata, Mapping):
@@ -377,13 +338,6 @@ class ProgressDisplay:
         # Prefer the deepest active section.
         return sorted(matches, key=lambda item: len(item[0]), reverse=True)[0][1]
 
-    def _pop_oldest_active_research_context(self) -> _ResearchUnitContext | None:
-        if not self._active_research:
-            return None
-        oldest_ns, oldest_context = sorted(self._active_research.items(), key=lambda item: item[1].index)[0]
-        self._active_research.pop(oldest_ns, None)
-        return oldest_context
-
     def _tool_depth(self, checkpoint_ns: str | None) -> int:
         context = self._active_research_context(checkpoint_ns)
         if context is not None:
@@ -411,11 +365,20 @@ class ProgressDisplay:
                 if domain:
                     self._evidence_domains.add(domain)
 
-    def _start_research_section(self, checkpoint_ns: str, metadata: Mapping[str, Any] | None) -> None:
+    def _start_research_section(
+        self,
+        checkpoint_ns: str,
+        metadata: Mapping[str, Any] | None,
+        data: Mapping[str, Any] | None,
+    ) -> None:
         if checkpoint_ns in self._active_research:
             return
 
-        topic = self._topic_queue.popleft() if self._topic_queue else "[topic unavailable]"
+        topic_from_input = _extract_topic_from_research_chain_input(data)
+        if topic_from_input:
+            topic = topic_from_input
+        else:
+            topic = "[topic unavailable]"
         context = _ResearchUnitContext(
             index=self._next_research_unit,
             topic=topic,
@@ -460,13 +423,31 @@ class ProgressDisplay:
             depth=2,
         )
 
-    def _handle_quality_gate(self, summary: str, reason: str, depth: int) -> None:
-        if summary == "received":
+    def _coerce_non_negative_int(self, value: Any, default: int = 0) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return max(0, parsed)
+
+    def _sync_runtime_evidence_totals(self, progress: Mapping[str, Any]) -> None:
+        evidence_count = self._coerce_non_negative_int(progress.get("evidence_record_count"), self._evidence_record_count)
+        source_domains = progress.get("source_domains")
+        if isinstance(source_domains, list):
+            normalized_domains = {str(domain).strip().lower() for domain in source_domains if str(domain).strip()}
+            self._evidence_domains = normalized_domains
+        self._evidence_record_count = evidence_count
+
+    def _handle_quality_gate(self, status: str, reason: str, depth: int) -> None:
+        if status == "pass":
             self._emit(
                 f"Quality gate: {self._evidence_record_count} evidence records, "
                 f"{len(self._evidence_domains)} source domains -> PASS",
                 depth=depth,
             )
+            return
+
+        if status != "retry":
             return
 
         self._emit(
@@ -476,46 +457,58 @@ class ProgressDisplay:
         )
         self._emit(f"Gate reason: {reason or 'unknown'}", depth=depth + 1)
 
-    def _handle_research_unit_failure(self, detail: str, depth: int) -> None:
-        context = self._pop_oldest_active_research_context()
-        if context is None:
-            self._emit(_summarize_research_failure(detail, "researcher"), depth=max(1, depth))
+    def _handle_research_unit_summary(self, summary: Mapping[str, Any], depth: int) -> None:
+        status = str(summary.get("status", "")).strip().lower()
+        topic = _truncate(str(summary.get("topic") or "[topic unavailable]"), 72)
+        try:
+            duration_seconds = max(0.0, float(summary.get("duration_seconds", 0.0)))
+        except (TypeError, ValueError):
+            duration_seconds = 0.0
+        duration_label = _format_duration(duration_seconds)
+
+        if status == "failed":
+            reason = str(summary.get("failure_reason") or "research unit execution failed")
+            unit_label = f'researcher "{topic}"'
+            self._emit(f"{_summarize_research_failure(reason, unit_label)} ({duration_label})", depth=max(1, depth))
+        elif status == "empty":
+            self._emit(f'researcher "{topic}" returned no usable notes', depth=max(1, depth))
+        elif status == "skipped":
+            self._emit(f'researcher "{topic}" deferred due to runtime caps.', depth=max(1, depth))
+        elif status == "missing_topic":
+            self._emit("Supervisor issued ConductResearch without a research_topic.", depth=max(1, depth))
+
+    def _handle_supervisor_runtime_progress(self, output: Mapping[str, Any], depth: int) -> None:
+        progress = _extract_runtime_progress_payload(output)
+        if not progress:
             return
 
-        unit_label = f'researcher[{context.index}] "{_truncate(context.topic, 72)}"'
-        elapsed = _format_duration(time.monotonic() - context.started_at)
-        self._emit(f"{_summarize_research_failure(detail, unit_label)} ({elapsed})", depth=1)
+        self._sync_runtime_evidence_totals(progress)
+        requested_count = self._coerce_non_negative_int(progress.get("requested_research_units"), 0)
+        dispatch_count = self._coerce_non_negative_int(progress.get("dispatched_research_units"), 0)
+        skipped_count = self._coerce_non_negative_int(progress.get("skipped_research_units"), 0)
+        supervisor_iteration = self._coerce_non_negative_int(progress.get("supervisor_iteration"), 1)
 
-    def _handle_supervisor_tool_messages(self, output: Mapping[str, Any], depth: int) -> None:
-        messages = output.get("supervisor_messages")
-        if not isinstance(messages, list):
-            return
+        if dispatch_count > 0:
+            message = (
+                f"Wave {self._active_wave}: Supervisor iteration {supervisor_iteration} - "
+                f"dispatching {dispatch_count} researcher{'s' if dispatch_count != 1 else ''} in parallel"
+            )
+            deferred_count = max(skipped_count, max(0, requested_count - dispatch_count))
+            if deferred_count > 0:
+                message += f" ({deferred_count} deferred by runtime caps)"
+            self._emit(message, depth=0)
+        else:
+            self._emit(f"Supervisor iteration {supervisor_iteration}: evaluating quality gate.", depth=0)
 
-        self._add_evidence(output.get("evidence_ledger"))
+        research_units = progress.get("research_units")
+        if isinstance(research_units, list):
+            for summary in research_units:
+                if isinstance(summary, Mapping):
+                    self._handle_research_unit_summary(summary, depth)
 
-        for message in messages:
-            if not isinstance(message, ToolMessage):
-                continue
-            kind, detail = _extract_tool_message_summary(message)
-            if kind == "research_complete_received":
-                self._handle_quality_gate("received", "", depth)
-            elif kind == "research_complete_rejected":
-                self._handle_quality_gate("rejected", detail, depth)
-            elif kind == "research_unit_failed":
-                self._handle_research_unit_failure(detail, depth)
-            elif kind == "research_unit_empty":
-                context = self._pop_oldest_active_research_context()
-                if context is not None:
-                    self._emit(
-                        f'researcher[{context.index}] "{_truncate(context.topic, 72)}" returned no usable notes',
-                        depth=1,
-                    )
-                else:
-                    self._emit("A research unit returned no usable notes", depth=max(1, depth))
-            elif kind == "research_unit_skipped":
-                self._emit("Supervisor deferred a research unit due to runtime caps.", depth=max(1, depth))
-            elif kind == "research_unit_missing_topic":
-                self._emit("Supervisor issued ConductResearch without a research_topic.", depth=max(1, depth))
+        quality_gate_status = str(progress.get("quality_gate_status", "none")).strip().lower()
+        quality_gate_reason = str(progress.get("quality_gate_reason") or "")
+        self._handle_quality_gate(quality_gate_status, quality_gate_reason, depth)
 
     def _handle_chain_start(
         self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None
@@ -532,33 +525,9 @@ class ProgressDisplay:
             return
 
         if event_name == "supervisor_tools":
-            input_payload = data.get("input") if isinstance(data, Mapping) else None
-            dispatch_topics, requested_count, dispatch_count = _extract_wave_dispatch_plan(input_payload)
             self._research_wave += 1
             self._active_wave = self._research_wave
             self._wave_started_at[self._active_wave] = time.monotonic()
-            self._wave_dispatch_count = dispatch_count
-            self._wave_requested_count = requested_count
-            self._topic_queue = deque(dispatch_topics)
-
-            supervisor_iteration = 1
-            if isinstance(input_payload, Mapping):
-                try:
-                    supervisor_iteration = int(input_payload.get("research_iterations", 0) or 0) + 1
-                except Exception:
-                    supervisor_iteration = 1
-
-            if dispatch_count > 0:
-                deferred_count = max(0, requested_count - dispatch_count)
-                message = (
-                    f"Wave {self._active_wave}: Supervisor iteration {supervisor_iteration} - "
-                    f"dispatching {dispatch_count} researcher{'s' if dispatch_count != 1 else ''} in parallel"
-                )
-                if deferred_count > 0:
-                    message += f" ({deferred_count} deferred by runtime caps)"
-                self._emit(message, depth=0)
-            else:
-                self._emit(f"Supervisor iteration {supervisor_iteration}: evaluating quality gate.", depth=0)
             return
 
         if event_name == "final_report_generation":
@@ -574,7 +543,7 @@ class ProgressDisplay:
 
         checkpoint_ns = str((metadata or {}).get("checkpoint_ns", "")) if isinstance(metadata, Mapping) else ""
         if checkpoint_ns and checkpoint_ns.count("|") == 1:
-            self._start_research_section(checkpoint_ns, metadata)
+            self._start_research_section(checkpoint_ns, metadata, data)
 
     def _handle_chain_end(self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None) -> None:
         if not isinstance(data, Mapping):
@@ -582,7 +551,7 @@ class ProgressDisplay:
 
         checkpoint_ns = str((metadata or {}).get("checkpoint_ns", "")) if isinstance(metadata, Mapping) else ""
         if event_name == "supervisor_tools":
-            self._handle_supervisor_tool_messages(data.get("output", {}), self._depth(metadata) + 1)
+            self._handle_supervisor_runtime_progress(data.get("output", {}), self._depth(metadata) + 1)
             if self._active_wave:
                 wave_elapsed = _format_duration(time.monotonic() - self._wave_started_at.get(self._active_wave, self._start))
                 self._emit(
@@ -707,9 +676,10 @@ class ProgressDisplay:
 
         if event_type == "on_chain_end":
             self._handle_chain_end(name, metadata, data)
-            if name == "LangGraph":
-                output = event.get("data", {}).get("output", {}) if isinstance(event.get("data"), Mapping) else {}
-                if self._is_top_level_graph_event(metadata) and isinstance(output, Mapping):
+            output = event.get("data", {}).get("output", {}) if isinstance(event.get("data"), Mapping) else {}
+            if self._is_top_level_graph_event(metadata) and isinstance(output, Mapping):
+                self._last_top_level_output = dict(output)
+                if name == "LangGraph" or "intake_decision" in output or "final_report" in output:
                     self._finish_pipeline()
                     return dict(output)
 
@@ -749,6 +719,10 @@ async def _run_with_progress(
         output = display.handle_event(event)
         if isinstance(output, Mapping):
             final_output = dict(output)
+
+    if not final_output and display._last_top_level_output:
+        final_output = dict(display._last_top_level_output)
+        display._finish_pipeline()
 
     return final_output
 

@@ -12,7 +12,7 @@ from .config import (
     get_search_tool,
 )
 from .nodes import _build_fetch_url_tool, _build_search_tool_with_processing, think_tool
-from .prompts import RESEARCHER_PROMPT
+from .prompts import RESEARCHER_PROMPT, RESEARCHER_PROMPT_NO_SEARCH
 from .state import EvidenceRecord, compress_note_text, stringify_tool_output
 
 try:  # pragma: no cover - import is environment-dependent
@@ -54,27 +54,32 @@ def _resolve_create_deep_agent():
     return runtime_create_deep_agent
 
 
-def build_research_tools(writer: Any | None = None) -> list[Any]:
+def _build_research_tools_and_capabilities(
+    writer: Any | None = None,
+) -> tuple[list[Any], bool]:
     base_search_tool = get_search_tool()
     fetch_url_tool = _build_fetch_url_tool(writer)
     tools = [think_tool, fetch_url_tool]
     if base_search_tool is not None:
         tools.insert(0, _build_search_tool_with_processing(base_search_tool, writer))
-    return tools
+    return tools, base_search_tool is not None
 
 
-def render_researcher_prompt() -> str:
-    return RESEARCHER_PROMPT.format(
-        researcher_search_budget=get_researcher_search_budget(),
-        max_react_tool_calls=get_max_react_tool_calls(),
-    )
+def render_researcher_prompt(*, search_enabled: bool = True) -> str:
+    prompt_template = RESEARCHER_PROMPT if search_enabled else RESEARCHER_PROMPT_NO_SEARCH
+    prompt_values: dict[str, Any] = {
+        "max_react_tool_calls": get_max_react_tool_calls(),
+    }
+    if search_enabled:
+        prompt_values["researcher_search_budget"] = get_researcher_search_budget()
+    return prompt_template.format(**prompt_values)
 
 
 def build_researcher_subgraph():
     """Build a deep-agent researcher with built-in middleware."""
     model_str = get_model_string("subagent")
-    tools = build_research_tools()
-    system_prompt = render_researcher_prompt()
+    tools, search_enabled = _build_research_tools_and_capabilities()
+    system_prompt = render_researcher_prompt(search_enabled=search_enabled)
     create_agent = _resolve_create_deep_agent()
 
     return create_agent(

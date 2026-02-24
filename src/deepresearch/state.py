@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal, Sequence, TypedDict
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.graph import MessagesState
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .config import get_supervisor_notes_max_bullets, get_supervisor_notes_word_budget
 from .message_utils import extract_text_content
@@ -179,6 +179,7 @@ class SupervisorState(TypedDict, total=False):
     research_iterations: int
     raw_notes: Annotated[list[str], operator.add]
     evidence_ledger: Annotated[list[EvidenceRecord], operator.add]
+    runtime_progress: dict[str, Any]
 
 
 class ResearchState(MessagesState):
@@ -314,7 +315,7 @@ def normalize_evidence_ledger(value: Any) -> list[EvidenceRecord]:
         if isinstance(item, dict):
             try:
                 normalized.append(EvidenceRecord.model_validate(item))
-            except Exception:
+            except ValidationError:
                 continue
             continue
     return normalized
@@ -401,7 +402,12 @@ def stringify_tool_output(output: Any) -> str:
     if isinstance(output, str):
         return output.strip()
     if isinstance(output, list):
-        return "\n".join(extract_text_content(item).strip() for item in output if extract_text_content(item).strip())
+        lines: list[str] = []
+        for item in output:
+            text = extract_text_content(item).strip()
+            if text:
+                lines.append(text)
+        return "\n".join(lines)
     if isinstance(output, dict):
         if "content" in output:
             return extract_text_content(output.get("content", "")).strip()

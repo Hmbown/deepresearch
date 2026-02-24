@@ -203,6 +203,14 @@ def _count_raw_result_items(raw_output: Any) -> int:
     return 1
 
 
+def _search_failure_message(query: str, attempts: int) -> str:
+    attempt_label = "attempt" if attempts == 1 else "attempts"
+    return (
+        f"Search failed for '{query}': provider request failed after "
+        f"{attempts} {attempt_label}."
+    )
+
+
 @tool(parse_docstring=True)
 def think_tool(reflection: str) -> str:
     """Record strategic reasoning between searches.
@@ -283,7 +291,6 @@ def _build_fetch_url_tool(
     return fetch_url
 
 
-
 def _build_search_tool_with_processing(
     base_search_tool: Any,
     writer: Callable[[dict[str, Any]], None] | None = None,
@@ -310,7 +317,7 @@ def _build_search_tool_with_processing(
             return "Search is unavailable in this run."
 
         raw_output = None
-        errors: list[str] = []
+        attempt_count = 0
 
         is_exa_search = base_search_tool.__class__.__name__ == "ExaSearchResults"
         payload_candidates: list[Any] = []
@@ -327,20 +334,20 @@ def _build_search_tool_with_processing(
         payload_candidates.append(query)
 
         for payload in payload_candidates:
+            attempt_count += 1
             try:
                 raw_output = await invoke_search(payload)
-            except Exception as exc:
-                errors.append(str(exc))
+            except Exception:
                 continue
 
             if isinstance(raw_output, dict) and raw_output.get("error"):
-                return f"Search failed for '{query}': {raw_output.get('error')}"
+                return _search_failure_message(query, attempt_count)
 
             if raw_output is not None:
                 break
 
         if raw_output is None:
-            return f"Search failed for '{query}': {' | '.join(errors)}"
+            return _search_failure_message(query, attempt_count or 1)
 
         raw_count = _count_raw_result_items(raw_output)
         normalized = _normalize_search_results(raw_output)

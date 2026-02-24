@@ -1,4 +1,6 @@
 import asyncio
+import sys
+import types
 from unittest.mock import AsyncMock, patch
 
 from deepresearch import nodes
@@ -66,7 +68,7 @@ def test_search_preprocessing_surfaces_provider_error_dict():
         writer=lambda event: None,
     )
     output = asyncio.run(search_tool.ainvoke({"query": "test error"}))
-    assert output == "Search failed for 'test error': provider unavailable"
+    assert output == "Search failed for 'test error': provider request failed after 1 attempt."
 
 
 def test_search_preprocessing_is_deterministic_and_llm_free():
@@ -122,7 +124,7 @@ def test_search_preprocessing_supports_searchresponse_objects():
     assert last_metric["returned_count"] == 2
 
 
-def test_fetch_url_extracts_content_with_trafilatura():
+def test_fetch_url_extracts_content_with_trafilatura(monkeypatch):
     events: list[dict] = []
     fetch_tool = nodes._build_fetch_url_tool(events.append)
 
@@ -131,6 +133,15 @@ def test_fetch_url_extracts_content_with_trafilatura():
     mock_response.status_code = 200
     mock_response.text = html
     mock_response.raise_for_status = lambda: None
+
+    trafilatura_calls = {"count": 0}
+
+    def _fake_extract(_html, include_links=True):
+        trafilatura_calls["count"] += 1
+        assert include_links is True
+        return "Main article content here."
+
+    monkeypatch.setitem(sys.modules, "trafilatura", types.SimpleNamespace(extract=_fake_extract))
 
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
@@ -141,8 +152,9 @@ def test_fetch_url_extracts_content_with_trafilatura():
 
         result = asyncio.run(fetch_tool.ainvoke({"url": "https://example.com/article"}))
 
-    assert len(result) > 0
+    assert result == "Main article content here."
     assert "[Fetch failed" not in result
+    assert trafilatura_calls["count"] == 1
     assert any(e.get("event") == "fetch_url" for e in events)
 
 
