@@ -123,3 +123,27 @@ def test_route_supervisor_prepare_returns_send_dispatches():
     assert len(dispatch) == 2
     assert all(isinstance(item, Send) for item in dispatch)
     assert dispatch[0].node == "run_research_unit"
+
+
+def test_research_barrier_waits_for_remaining_research_units():
+    command = supervisor_subgraph.research_barrier(
+        {
+            "pending_dispatched_research_units": 2,
+            "research_unit_summaries": [{"call_id": "call-1"}],
+            "research_unit_summaries_consumed": 0,
+        }
+    )
+
+    assert command.goto == ()
+
+
+def test_research_barrier_routes_to_finalize_when_wave_is_complete():
+    command = supervisor_subgraph.research_barrier(
+        {
+            "pending_dispatched_research_units": 2,
+            "research_unit_summaries": [{"call_id": "call-1"}, {"call_id": "call-2"}],
+            "research_unit_summaries_consumed": 0,
+        }
+    )
+
+    assert command.goto == "supervisor_finalize"
