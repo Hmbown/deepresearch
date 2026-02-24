@@ -1,42 +1,85 @@
 # Deep Research
 
-Deep Research is a LangGraph-based multi-agent system that clarifies scope when needed, runs focused web research in parallel, and returns a synthesized answer with citations.
+LangGraph multi-agent system that clarifies scope when needed, runs focused web research in parallel, and synthesizes a cited answer. One canonical runtime path: `scope_intake -> research_supervisor -> final_report_generation`.
 
-![Architecture Graph](docs/architecture.png)
+## Prerequisites
 
-## Setup
-
-Requirements:
 - Python 3.11+
-- LLM API key (for the default OpenAI model, set `OPENAI_API_KEY`)
-- Search API key (default provider is Exa, set `EXA_API_KEY`)
+- OpenAI API key (`OPENAI_API_KEY`) — required
+- Tavily API key (`TAVILY_API_KEY`) — optional, for web search (default provider; Exa also supported)
 
-Install and configure:
+## Install
 
 ```bash
 git clone https://github.com/Hmbown/deepresearch.git
 cd deepresearch
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-cp .env.example .env
+pipx install --force --editable .
 ```
 
-Run preflight and a query:
+## Configure
+
+```bash
+cp .env.example .env
+# Edit .env — set at minimum OPENAI_API_KEY
+```
+
+## Preflight
 
 ```bash
 deepresearch --preflight
-deepresearch "Your research question"
 ```
 
-For full environment/config options, see `.env.example`.
+Pass a LangSmith project name to also verify tracing auth:
 
-## Architecture
+```bash
+deepresearch --preflight my-langsmith-project
+```
 
-The runtime uses one canonical path: `scope_intake -> research_supervisor -> final_report_generation` ([`src/deepresearch/graph.py`](src/deepresearch/graph.py)). Intake decides whether clarification is needed, the supervisor delegates independent research tracks (parallel where possible), and researcher outputs are synthesized into a final report with inline citations and source URLs.
+## Run (CLI)
 
-## Design Rationale
+```bash
+deepresearch "your research question"
+```
 
-See [DESIGN.md](design.md) for design rationale.
+## Run (LangGraph dev server + Studio)
+
+Start the local dev server:
+
+```bash
+uvx --refresh --from "langgraph-cli[inmem]" --with-editable . --python 3.11 \
+  langgraph dev --host 127.0.0.1 --port 2024 --no-browser --allow-blocking
+```
+
+Then open Studio via LangSmith at:
+
+```
+https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
+```
+
+## No-search fallback (smoke test)
+
+If Exa credits are exhausted or you want to validate the runtime path without web search:
+
+```bash
+SEARCH_PROVIDER=none deepresearch "summarize the key differences between Python 3.11 and 3.12"
+```
+
+This exercises intake, supervisor dispatch, and report synthesis using only model knowledge.
+
+## LangSmith tracing
+
+Set these in `.env` to enable tracing:
+
+```
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=<your-langsmith-api-key>
+LANGCHAIN_PROJECT=deepresearch-local
+```
+
+## Common gotchas
+
+- **`http://127.0.0.1:2024` is the LangGraph local API**, not LangSmith. Do NOT set `LANGCHAIN_ENDPOINT` to localhost — that breaks cloud tracing. Leave `LANGCHAIN_ENDPOINT` unset (defaults to `https://api.smith.langchain.com`).
+- **LangSmith shows "No data" but auth is valid**: check your LangSmith billing/quota limits — rate-limited free tiers surface this way.
+- **Search credit errors** (Exa `402`, Tavily quota): set `SEARCH_PROVIDER=none` in `.env` to keep working without web search.
+- **`deepagents` not found**: re-run `pip install -e .` — it's listed as a project dependency.
+- **OpenAI Responses API issues**: the default config uses the Responses API. If you hit errors, check `OPENAI_USE_RESPONSES_API` in `.env.example`.

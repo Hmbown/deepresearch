@@ -66,7 +66,7 @@ Runtime is a native LangGraph graph (intake → supervisor → report) with the 
 
 ## Search
 
-- Provider priority: Exa -> Tavily -> None.
+- Provider priority: Tavily (default) -> Exa -> None.
 - Search preprocessing remains deterministic:
   - normalize -> dedupe -> sort -> truncate.
 - `fetch_url` remains available for full-page extraction.
