@@ -241,17 +241,17 @@ class ResearchBrief(BaseModel):
 
 
 class ResearchPlan(BaseModel):
-    """Structured research plan shown to user before execution begins."""
+    """Short research plan preview for user approval. Keep every field concise."""
 
-    scope: str = Field(description="One-sentence summary of what will be researched and any boundaries.")
+    scope: str = Field(description="One sentence: what will be researched and any boundaries.")
     research_tracks: list[str] = Field(
-        description="Ordered list of focused research tracks that will be investigated in parallel.",
+        description="3-6 research tracks. Each track is ONE sentence describing the angle, not the methodology.",
     )
     evidence_strategy: str = Field(
-        description="Brief description of evidence targets: what kinds of sources and how contradictions will be handled.",
+        description="One sentence: what source types to prioritize.",
     )
     output_format: str = Field(
-        description="Expected output format (e.g. 'memo-style report with inline citations').",
+        description="One sentence: deliverable format (e.g. 'memo-style report with inline citations').",
     )
 
 

@@ -71,8 +71,7 @@ Return a single research brief with these constraints:
 """
 
 RESEARCH_PLAN_PROMPT = """\
-You will be given a research brief synthesized from a user conversation.
-Your job is to produce a concrete research plan that will be shown to the user before research begins.
+You will be given a research brief. Produce a short research plan to show the user before research begins.
 
 Research brief:
 {research_brief}
@@ -80,15 +79,14 @@ Research brief:
 Today's date is {date}.
 
 Generate a plan with:
-1. Scope: one sentence describing what will be researched, including any boundaries (timeframe, geography, etc.).
-2. Research tracks: a list of 3-8 focused, independent research tracks that together cover the brief.
-   - Each track should be specific enough to delegate to a single researcher.
-   - Tracks should be complementary, not overlapping.
-   - For complex topics, include tracks for cross-checking and contradiction resolution.
-3. Evidence strategy: what kinds of sources to prioritize and how contradictions will be handled.
-4. Output format: describe the expected deliverable (default: memo-style report with inline citations and uncertainty notes).
+1. Scope: one sentence — what will be researched and any boundaries.
+2. Research tracks: 3-6 tracks, each one sentence. Just the angle/question, not the methodology.
+3. Evidence strategy: one sentence — what source types to prioritize.
+4. Output format: one sentence — what the deliverable looks like.
 
-Be specific to the actual topic. Do not use generic boilerplate.
+Keep it short. This is a preview for the user to approve, not the research itself.
+Do not describe methodology, analytical frameworks, or data processing steps.
+Each research track should be a plain-language description of what will be investigated.
 """
 
 SUPERVISOR_PROMPT = """\
