@@ -164,8 +164,6 @@ def _parse_search_summary(raw: str) -> tuple[int, list[str]]:
         return 0, []
 
     source_count = len(_SEARCH_SOURCE_RE.findall(raw))
-    if source_count == 0 and raw.strip():
-        source_count = 0
 
     domains: list[str] = []
     for match in _SEARCH_URL_RE.finditer(raw):
@@ -308,6 +306,12 @@ class ProgressDisplay:
 
     def elapsed(self) -> float:
         return time.monotonic() - self._start
+
+    def latest_output(self) -> dict[str, Any]:
+        return dict(self._last_top_level_output)
+
+    def finish_if_needed(self) -> None:
+        self._finish_pipeline()
 
     def _is_top_level_graph_event(self, metadata: Mapping[str, Any] | None) -> bool:
         if not isinstance(metadata, Mapping):
@@ -757,9 +761,10 @@ async def _run_with_progress(
         if isinstance(output, Mapping):
             final_output = dict(output)
 
-    if not final_output and display._last_top_level_output:
-        final_output = dict(display._last_top_level_output)
-        display._finish_pipeline()
+    if not final_output:
+        final_output = display.latest_output()
+        if final_output:
+            display.finish_if_needed()
 
     return final_output
 
@@ -856,11 +861,13 @@ def _prompt_search_provider() -> str:
         print("Choose one of: exa, tavily, none.")
 
 
-def run_setup_wizard() -> int:
-    """Run interactive setup and verify configuration with preflight."""
+def _print_setup_header() -> None:
     print("Deep Research Setup")
     print("-" * 40)
     print("Required fields are marked in prompts.")
+
+
+def _collect_setup_inputs() -> tuple[dict[str, str], bool, str | None]:
     openai_key = _prompt_required_value("OpenAI API key (required): ", secret=True)
 
     search_provider = _prompt_search_provider()
@@ -892,8 +899,17 @@ def run_setup_wizard() -> int:
     else:
         updates["LANGCHAIN_TRACING_V2"] = "false"
 
-    dotenv_path = update_project_dotenv(updates)
+    return updates, langsmith_enabled, langsmith_project
 
+
+def _print_setup_summary(
+    dotenv_path: str,
+    updates: Mapping[str, str],
+    *,
+    langsmith_enabled: bool,
+    langsmith_project: str | None,
+) -> None:
+    search_provider = updates.get("SEARCH_PROVIDER", "exa")
     print(f"\nWrote setup to `{dotenv_path}`")
     print("\nConfigured services")
     print("-" * 40)
@@ -913,17 +929,39 @@ def run_setup_wizard() -> int:
     else:
         print("LangSmith: disabled")
 
-    if langsmith_enabled and _prompt_yes_no("Open LangSmith in browser now?", default=False):
-        try:
-            webbrowser.open("https://smith.langchain.com/")
-        except Exception:
-            pass
 
+def _maybe_open_langsmith(langsmith_enabled: bool) -> None:
+    if not langsmith_enabled:
+        return
+    if not _prompt_yes_no("Open LangSmith in browser now?", default=False):
+        return
+    try:
+        webbrowser.open("https://smith.langchain.com/")
+    except Exception as exc:
+        print(f"Could not open browser automatically: {exc}")
+
+
+def _run_post_setup_preflight(langsmith_enabled: bool, langsmith_project: str | None) -> int:
     print("\nRunning preflight...")
     result_code = print_preflight(project_name=langsmith_project if langsmith_enabled else None)
     if result_code == 0:
         print("\nSetup complete, ready to run: deepresearch 'your query'")
     return result_code
+
+
+def run_setup_wizard() -> int:
+    """Run interactive setup and verify configuration with preflight."""
+    _print_setup_header()
+    updates, langsmith_enabled, langsmith_project = _collect_setup_inputs()
+    dotenv_path = update_project_dotenv(updates)
+    _print_setup_summary(
+        str(dotenv_path),
+        updates,
+        langsmith_enabled=langsmith_enabled,
+        langsmith_project=langsmith_project,
+    )
+    _maybe_open_langsmith(langsmith_enabled)
+    return _run_post_setup_preflight(langsmith_enabled, langsmith_project)
 
 
 async def run_session(thread_id: str, *, quiet: bool = False, verbose: bool = False) -> None:

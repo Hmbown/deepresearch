@@ -21,7 +21,7 @@ deepresearch/
 │   ├── __init__.py
 │   ├── graph.py                  # LangGraph runtime assembly (build_app, exported app)
 │   ├── researcher_subgraph.py    # Deep agent researcher + evidence extraction
-│   ├── supervisor_subgraph.py    # Supervisor loop with parallel dispatch + quality gate
+│   ├── supervisor_subgraph.py    # Supervisor loop with parallel dispatch and completion signaling
 │   ├── intake.py                 # Scope intake (clarification + brief synthesis)
 │   ├── report.py                 # Final report synthesis with citations
 │   ├── state.py                  # Shared state models (EvidenceRecord, ResearchState)

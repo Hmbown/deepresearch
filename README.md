@@ -15,7 +15,7 @@ LangGraph multi-agent system that clarifies scope when needed, runs focused web 
 ```bash
 git clone https://github.com/Hmbown/deepresearch.git
 cd deepresearch
-pipx install --force --editable .
+pip install -e .
 ```
 
 ## Configure
@@ -83,5 +83,5 @@ LANGCHAIN_PROJECT=deepresearch-local
 - **`http://127.0.0.1:2024` is the LangGraph local API**, not LangSmith. Do NOT set `LANGCHAIN_ENDPOINT` to localhost — that breaks cloud tracing. Leave `LANGCHAIN_ENDPOINT` unset (defaults to `https://api.smith.langchain.com`).
 - **LangSmith shows "No data" but auth is valid**: check your LangSmith billing/quota limits — rate-limited free tiers surface this way.
 - **Search credit errors** (Exa `402`, Tavily quota): set `SEARCH_PROVIDER=none` in `.env` to keep working without web search.
-- **`deepagents` not found**: re-run `pip install -e .` — it's listed as a project dependency.
+- **`deepagents` not found**: re-run `pip install -e .`.
 - **OpenAI Responses API issues**: the default config uses the Responses API. If you hit errors, check `OPENAI_USE_RESPONSES_API` in `.env.example`.

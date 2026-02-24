@@ -15,13 +15,15 @@ def test_resolve_model_for_role_defaults_and_overrides(monkeypatch):
 
     assert config._resolve_model_for_role("orchestrator") == config.DEFAULT_ORCHESTRATOR_MODEL
     assert config._resolve_model_for_role("subagent") == config.DEFAULT_SUBAGENT_MODEL
-    assert config._resolve_model_for_role("unknown_role") == config.DEFAULT_SUBAGENT_MODEL
+    with pytest.raises(ValueError, match="Unsupported model role"):
+        config._resolve_model_for_role("unknown_role")  # type: ignore[arg-type]
 
     monkeypatch.setenv("ORCHESTRATOR_MODEL", "openai:o-test")
     monkeypatch.setenv("SUBAGENT_MODEL", "openai:s-test")
     assert config._resolve_model_for_role("orchestrator") == "openai:o-test"
     assert config._resolve_model_for_role("subagent") == "openai:s-test"
-    assert config._resolve_model_for_role("unknown_role") == "openai:s-test"
+    with pytest.raises(ValueError, match="Unsupported model role"):
+        config._resolve_model_for_role("unknown_role")  # type: ignore[arg-type]
 
 
 def test_get_llm_passes_resolved_model(monkeypatch):
@@ -226,12 +228,11 @@ def test_get_search_tool_uses_exa_when_provider_is_configured(monkeypatch):
 
 
 def test_get_search_tool_uses_tavily_when_provider_is_configured(monkeypatch):
-    class FakeTavilySearchResults:
+    class FakeTavilySearch:
         def __init__(self, **kwargs):
             self.provider = "tavily"
-            self.kwargs = kwargs
 
-    fake_langchain_tavily = types.SimpleNamespace(TavilySearchResults=FakeTavilySearchResults)
+    fake_langchain_tavily = types.SimpleNamespace(TavilySearch=FakeTavilySearch)
 
     monkeypatch.setenv("SEARCH_PROVIDER", "tavily")
     monkeypatch.setenv("TAVILY_API_KEY", "tavily-key")
@@ -239,7 +240,6 @@ def test_get_search_tool_uses_tavily_when_provider_is_configured(monkeypatch):
 
     tool = config.get_search_tool()
     assert tool.provider == "tavily"
-    assert tool.kwargs["api_key"] == "tavily-key"
 
 
 def test_get_search_tool_returns_none_when_provider_is_none(monkeypatch):

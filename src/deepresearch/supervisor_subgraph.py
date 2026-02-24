@@ -105,10 +105,7 @@ def _extract_source_domains(evidence_ledger: list[EvidenceRecord]) -> list[str]:
     domains: set[str] = set()
     for record in evidence_ledger:
         for url in record.source_urls:
-            try:
-                parsed = urlparse(url)
-            except Exception:
-                continue
+            parsed = urlparse(str(url))
             domain = (parsed.netloc or "").strip().lower()
             if domain:
                 domains.add(domain)
@@ -141,6 +138,125 @@ def _prepare_reset_payload() -> dict[str, Any]:
         "pending_dispatched_research_units": 0,
         "pending_skipped_research_units": 0,
         "pending_remaining_iterations": 0,
+    }
+
+
+def _latest_ai_with_tool_calls(state: SupervisorState) -> AIMessage | None:
+    supervisor_messages = list(convert_to_messages(state.get("supervisor_messages", [])))
+    latest_ai = latest_ai_message(supervisor_messages)
+    if latest_ai is None:
+        return None
+    if not _normalize_tool_calls(getattr(latest_ai, "tool_calls", None)):
+        return None
+    return latest_ai
+
+
+def _partition_tool_calls(
+    tool_calls: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    think_calls = [call for call in tool_calls if call.get("name") == think_tool.name]
+    research_calls = [call for call in tool_calls if call.get("name") == ConductResearch.__name__]
+    complete_calls = [call for call in tool_calls if call.get("name") == ResearchComplete.__name__]
+    return think_calls, research_calls, complete_calls
+
+
+async def _run_think_calls(think_calls: list[dict[str, Any]]) -> list[ToolMessage]:
+    tool_messages: list[ToolMessage] = []
+    for index, call in enumerate(think_calls):
+        args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        content = await invoke_single_tool(think_tool, args)
+        tool_messages.append(
+            ToolMessage(
+                content=content or "[No reflection recorded]",
+                name=think_tool.name,
+                tool_call_id=str(call.get("id") or f"supervisor_think_{index}"),
+            )
+        )
+    return tool_messages
+
+
+def _prepare_research_calls(
+    runnable_research_calls: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    prepared_research_calls: list[dict[str, Any]] = []
+    for index, call in enumerate(runnable_research_calls):
+        args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        prepared_research_calls.append(
+            {
+                "id": str(call.get("id") or f"supervisor_research_{index}"),
+                "args": args,
+                "topic": state_text_or_none(args.get("research_topic")) or "",
+            }
+        )
+    return prepared_research_calls
+
+
+def _prepare_complete_call_payloads(complete_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    complete_call_payloads: list[dict[str, Any]] = []
+    for index, call in enumerate(complete_calls):
+        complete_call_payloads.append(
+            {
+                "id": str(call.get("id") or f"supervisor_complete_{index}"),
+            }
+        )
+    return complete_call_payloads
+
+
+def _build_skipped_research_messages(
+    skipped_research_calls: list[dict[str, Any]],
+    remaining_iterations: int,
+) -> tuple[list[ToolMessage], list[dict[str, Any]]]:
+    tool_messages: list[ToolMessage] = []
+    skipped_summaries: list[dict[str, Any]] = []
+    max_concurrent_research_units = get_max_concurrent_research_units()
+    for index, call in enumerate(skipped_research_calls):
+        args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        topic = state_text_or_none(args.get("research_topic")) or ""
+        tool_call_id = str(call.get("id") or f"supervisor_research_skipped_{index}")
+        tool_messages.append(
+            ToolMessage(
+                content=(
+                    "[ConductResearch skipped: reached runtime cap "
+                    f"(max_concurrent_research_units={max_concurrent_research_units}, "
+                    f"remaining_iterations={remaining_iterations})]"
+                ),
+                name=ConductResearch.__name__,
+                tool_call_id=tool_call_id,
+            )
+        )
+        skipped_summaries.append(
+            {
+                "call_id": tool_call_id,
+                "topic": topic,
+                "status": "skipped",
+                "failure_reason": "reached runtime cap",
+                "evidence_record_count": 0,
+                "source_domain_count": 0,
+                "duration_seconds": 0.0,
+            }
+        )
+    return tool_messages, skipped_summaries
+
+
+def _build_prepare_update(
+    *,
+    think_messages: list[ToolMessage],
+    skipped_messages: list[ToolMessage],
+    skipped_summaries: list[dict[str, Any]],
+    research_calls: list[dict[str, Any]],
+    prepared_research_calls: list[dict[str, Any]],
+    complete_call_payloads: list[dict[str, Any]],
+    remaining_iterations: int,
+) -> dict[str, Any]:
+    return {
+        "supervisor_messages": [*think_messages, *skipped_messages],
+        "pending_research_calls": prepared_research_calls,
+        "pending_complete_calls": complete_call_payloads,
+        "pending_requested_research_units": len(research_calls),
+        "pending_dispatched_research_units": len(prepared_research_calls),
+        "pending_skipped_research_units": len(research_calls) - len(prepared_research_calls),
+        "pending_remaining_iterations": remaining_iterations,
+        "research_unit_summaries": skipped_summaries,
     }
 
 
@@ -190,18 +306,13 @@ async def invoke_single_tool(tool_obj: Any, args: dict[str, Any]) -> str:
 
 async def supervisor_prepare(state: SupervisorState, config: RunnableConfig = None) -> dict[str, Any]:
     """Prepare one supervisor tool cycle and compute research dispatch inputs."""
-    supervisor_messages = list(convert_to_messages(state.get("supervisor_messages", [])))
-    latest_ai = latest_ai_message(supervisor_messages)
+    del config
+    latest_ai = _latest_ai_with_tool_calls(state)
     if latest_ai is None:
         return _prepare_reset_payload()
 
     tool_calls = _normalize_tool_calls(getattr(latest_ai, "tool_calls", None))
-    if not tool_calls:
-        return _prepare_reset_payload()
-
-    think_calls = [call for call in tool_calls if call.get("name") == think_tool.name]
-    research_calls = [call for call in tool_calls if call.get("name") == ConductResearch.__name__]
-    complete_calls = [call for call in tool_calls if call.get("name") == ResearchComplete.__name__]
+    think_calls, research_calls, complete_calls = _partition_tool_calls(tool_calls)
     research_iterations = _coerce_non_negative_int(state.get("research_iterations", 0))
     log_runtime_event(
         _logger,
@@ -213,17 +324,7 @@ async def supervisor_prepare(state: SupervisorState, config: RunnableConfig = No
         complete_calls=len(complete_calls),
     )
 
-    tool_messages: list[ToolMessage] = []
-    for index, call in enumerate(think_calls):
-        args = call.get("args") if isinstance(call.get("args"), dict) else {}
-        content = await invoke_single_tool(think_tool, args)
-        tool_messages.append(
-            ToolMessage(
-                content=content or "[No reflection recorded]",
-                name=think_tool.name,
-                tool_call_id=str(call.get("id") or f"supervisor_think_{index}"),
-            )
-        )
+    think_messages = await _run_think_calls(think_calls)
 
     dispatch_count, remaining_iterations = compute_research_dispatch_counts(
         requested_research_units=len(research_calls),
@@ -232,52 +333,12 @@ async def supervisor_prepare(state: SupervisorState, config: RunnableConfig = No
     runnable_research_calls = research_calls[:dispatch_count]
     skipped_research_calls = research_calls[dispatch_count:]
 
-    prepared_research_calls: list[dict[str, Any]] = []
-    for index, call in enumerate(runnable_research_calls):
-        args = call.get("args") if isinstance(call.get("args"), dict) else {}
-        prepared_research_calls.append(
-            {
-                "id": str(call.get("id") or f"supervisor_research_{index}"),
-                "args": args,
-                "topic": state_text_or_none(args.get("research_topic")) or "",
-            }
-        )
-
-    complete_call_payloads: list[dict[str, Any]] = []
-    for index, call in enumerate(complete_calls):
-        complete_call_payloads.append(
-            {
-                "id": str(call.get("id") or f"supervisor_complete_{index}"),
-            }
-        )
-
-    max_concurrent_research_units = get_max_concurrent_research_units()
-    skipped_summaries: list[dict[str, Any]] = []
-    for index, call in enumerate(skipped_research_calls):
-        args = call.get("args") if isinstance(call.get("args"), dict) else {}
-        topic = state_text_or_none(args.get("research_topic")) or ""
-        tool_messages.append(
-            ToolMessage(
-                content=(
-                    "[ConductResearch skipped: reached runtime cap "
-                    f"(max_concurrent_research_units={max_concurrent_research_units}, "
-                    f"remaining_iterations={remaining_iterations})]"
-                ),
-                name=ConductResearch.__name__,
-                tool_call_id=str(call.get("id") or f"supervisor_research_skipped_{index}"),
-            )
-        )
-        skipped_summaries.append(
-            {
-                "call_id": str(call.get("id") or f"supervisor_research_skipped_{index}"),
-                "topic": topic,
-                "status": "skipped",
-                "failure_reason": "reached runtime cap",
-                "evidence_record_count": 0,
-                "source_domain_count": 0,
-                "duration_seconds": 0.0,
-            }
-        )
+    prepared_research_calls = _prepare_research_calls(runnable_research_calls)
+    complete_call_payloads = _prepare_complete_call_payloads(complete_calls)
+    skipped_messages, skipped_summaries = _build_skipped_research_messages(
+        skipped_research_calls,
+        remaining_iterations,
+    )
 
     if prepared_research_calls:
         log_runtime_event(
@@ -288,16 +349,15 @@ async def supervisor_prepare(state: SupervisorState, config: RunnableConfig = No
             remaining_iterations=remaining_iterations,
         )
 
-    return {
-        "supervisor_messages": tool_messages,
-        "pending_research_calls": prepared_research_calls,
-        "pending_complete_calls": complete_call_payloads,
-        "pending_requested_research_units": len(research_calls),
-        "pending_dispatched_research_units": len(prepared_research_calls),
-        "pending_skipped_research_units": len(skipped_research_calls),
-        "pending_remaining_iterations": remaining_iterations,
-        "research_unit_summaries": skipped_summaries,
-    }
+    return _build_prepare_update(
+        think_messages=think_messages,
+        skipped_messages=skipped_messages,
+        skipped_summaries=skipped_summaries,
+        research_calls=research_calls,
+        prepared_research_calls=prepared_research_calls,
+        complete_call_payloads=complete_call_payloads,
+        remaining_iterations=remaining_iterations,
+    )
 
 
 def route_supervisor_prepare(
@@ -343,34 +403,7 @@ def research_barrier(state: SupervisorState) -> Command[Literal["supervisor_fina
 
 async def run_research_unit(state: dict[str, Any]) -> dict[str, Any]:
     """Execute one ConductResearch call from Send fan-out."""
-    call = state.get("research_call") if isinstance(state, dict) else None
-    if not isinstance(call, dict):
-        return {
-            "supervisor_messages": [
-                ToolMessage(
-                    content="[ConductResearch missing research_topic]",
-                    name=ConductResearch.__name__,
-                    tool_call_id="supervisor_research_missing_call",
-                )
-            ],
-            "research_unit_summaries": [
-                {
-                    "call_id": "supervisor_research_missing_call",
-                    "topic": "",
-                    "status": "missing_topic",
-                    "failure_reason": "missing research_topic",
-                    "evidence_record_count": 0,
-                    "source_domain_count": 0,
-                    "duration_seconds": 0.0,
-                }
-            ],
-        }
-
-    call_id = str(call.get("id") or "supervisor_research")
-    args = call.get("args") if isinstance(call.get("args"), dict) else {}
-    topic = state_text_or_none(call.get("topic")) or state_text_or_none(args.get("research_topic"))
-    started_at = asyncio.get_running_loop().time()
-    if not topic:
+    def _missing_topic_result(call_id: str, duration_seconds: float) -> dict[str, Any]:
         return {
             "supervisor_messages": [
                 ToolMessage(
@@ -387,10 +420,22 @@ async def run_research_unit(state: dict[str, Any]) -> dict[str, Any]:
                     "failure_reason": "missing research_topic",
                     "evidence_record_count": 0,
                     "source_domain_count": 0,
-                    "duration_seconds": round(asyncio.get_running_loop().time() - started_at, 3),
+                    "duration_seconds": duration_seconds,
                 }
             ],
         }
+
+    call = state.get("research_call") if isinstance(state, dict) else None
+    if not isinstance(call, dict):
+        return _missing_topic_result("supervisor_research_missing_call", 0.0)
+
+    call_id = str(call.get("id") or "supervisor_research")
+    args = call.get("args") if isinstance(call.get("args"), dict) else {}
+    topic = state_text_or_none(call.get("topic")) or state_text_or_none(args.get("research_topic"))
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+    if not topic:
+        return _missing_topic_result(call_id, round(loop.time() - started_at, 3))
 
     researcher_graph = build_researcher_subgraph()
     payload = {"messages": [HumanMessage(content=topic)]}
@@ -513,8 +558,6 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
     next_research_iterations = research_iterations + dispatched_research_units
     if completed:
         next_research_iterations = max_researcher_iterations
-    elif complete_calls and dispatched_research_units == 0:
-        next_research_iterations = min(max_researcher_iterations, research_iterations + 1)
 
     all_summaries = state.get("research_unit_summaries")
     summary_items = all_summaries if isinstance(all_summaries, list) else []

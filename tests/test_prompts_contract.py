@@ -11,8 +11,8 @@ def test_clarify_prompt_includes_multi_turn_instruction():
         "<Messages>",
         "{messages}",
         "{date}",
-        "clarif",
-        "scope",
+        "Decide: ask a clarifying question, or proceed to research.",
+        "Ask up to 3 scope-narrowing questions in a single message.",
     ]
     for token in required_tokens:
         assert token in prompts.CLARIFY_PROMPT

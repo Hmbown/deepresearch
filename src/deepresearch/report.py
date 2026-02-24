@@ -88,6 +88,19 @@ def _extract_source_urls_from_evidence(evidence_ledger: list[EvidenceRecord]) ->
     return ordered_urls
 
 
+def _merge_unique_urls(*url_groups: list[str]) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for group in url_groups:
+        for url in group:
+            normalized = _normalize_source_url(url)
+            if not _is_valid_source_url(normalized) or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(normalized)
+    return merged
+
+
 def _remove_internal_meta_lines(report_text: str) -> str:
     filtered_lines: list[str] = []
     for line in report_text.splitlines():
@@ -120,11 +133,12 @@ def _ensure_source_transparency_markers(
     evidence_ledger: list[EvidenceRecord],
 ) -> str:
     report_text = state_text_or_none(final_report) or FALLBACK_FINAL_REPORT
-    source_urls = _extract_source_urls(note_chunks, raw_note_chunks)
-    source_urls = _extract_source_urls(source_urls, _extract_source_urls_from_evidence(evidence_ledger))
+    source_urls = _merge_unique_urls(
+        _extract_source_urls(note_chunks, raw_note_chunks),
+        _extract_source_urls_from_evidence(evidence_ledger),
+        _extract_source_urls([report_text]),
+    )
     report_urls = _extract_source_urls([report_text])
-    if report_urls:
-        source_urls = _extract_source_urls(source_urls, report_urls)
 
     report_text = _strip_no_source_urls_sentinel(report_text)
     report_text = state_text_or_none(report_text) or FALLBACK_FINAL_REPORT
@@ -143,116 +157,175 @@ def _ensure_source_transparency_markers(
     return f"{report_text.rstrip()}\n\nSources:\n{source_lines}"
 
 
-async def final_report_generation(
+def _normalized_report_inputs(state: ResearchState) -> tuple[list[str], list[str], list[EvidenceRecord]]:
+    return (
+        normalize_note_list(state.get("notes")),
+        normalize_note_list(state.get("raw_notes")),
+        normalize_evidence_ledger(state.get("evidence_ledger")),
+    )
+
+
+def _seed_compressed_notes(note_chunks: list[str], raw_note_chunks: list[str]) -> list[str]:
+    if note_chunks or not raw_note_chunks:
+        return note_chunks
+    compressed_seed = compress_note_text(join_note_list(raw_note_chunks))
+    if not compressed_seed:
+        return note_chunks
+    return [compressed_seed]
+
+
+def _synthesis_chunks_for_attempt(
+    note_chunks: list[str],
+    raw_note_chunks: list[str],
+    attempt: int,
+) -> tuple[list[str], list[str]]:
+    if attempt == 0:
+        prompt_note_chunks = note_chunks
+        prompt_raw_chunks = raw_note_chunks
+    else:
+        note_limit = max(1, len(note_chunks) // (attempt + 1)) if note_chunks else 0
+        raw_limit = max(1, len(raw_note_chunks) // (attempt + 1)) if raw_note_chunks else 0
+        prompt_note_chunks = note_chunks[:note_limit] if note_limit else []
+        prompt_raw_chunks = raw_note_chunks[:raw_limit] if raw_limit else []
+
+    # Prefer compressed notes. Raw notes are usually tool-heavy and can overflow
+    # the orchestrator context window, so only include them when no compressed notes exist.
+    if prompt_note_chunks:
+        prompt_raw_chunks = []
+    return prompt_note_chunks, prompt_raw_chunks
+
+
+def _build_synthesis_payload(
     state: ResearchState,
-    config: RunnableConfig = None,
-) -> dict[str, Any]:
-    """Create final report from supervisor outputs when not already completed."""
-    final_report = state_text_or_none(state.get("final_report"))
-    note_chunks = normalize_note_list(state.get("notes"))
-    raw_note_chunks = normalize_note_list(state.get("raw_notes"))
-    evidence_ledger = normalize_evidence_ledger(state.get("evidence_ledger"))
+    prompt_note_chunks: list[str],
+    prompt_raw_chunks: list[str],
+) -> str:
+    notes_text = join_note_list(prompt_note_chunks) or "[No compressed notes]"
+    raw_notes_text = join_note_list(prompt_raw_chunks) or "[No raw notes]"
+    synthesis_sections = [
+        f"Research brief:\n{state_text_or_none(state.get('research_brief')) or '[Missing brief]'}",
+        f"Compressed notes:\n{notes_text}",
+    ]
+    if prompt_raw_chunks:
+        synthesis_sections.append(f"Raw notes:\n{raw_notes_text}")
+    synthesis_sections.append("Write the final report now.")
+    return "\n\n".join(synthesis_sections)
 
-    if not final_report:
-        model = get_llm("orchestrator")
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            if not note_chunks and raw_note_chunks:
-                compressed_seed = compress_note_text(join_note_list(raw_note_chunks))
-                if compressed_seed:
-                    note_chunks = [compressed_seed]
 
-            if attempt == 0:
-                prompt_note_chunks = note_chunks
-                prompt_raw_chunks = raw_note_chunks
-            else:
-                note_limit = max(1, len(note_chunks) // (attempt + 1)) if note_chunks else 0
-                raw_limit = max(1, len(raw_note_chunks) // (attempt + 1)) if raw_note_chunks else 0
-                prompt_note_chunks = note_chunks[:note_limit] if note_limit else []
-                prompt_raw_chunks = raw_note_chunks[:raw_limit] if raw_limit else []
+async def _synthesize_with_retries(
+    state: ResearchState,
+    note_chunks: list[str],
+    raw_note_chunks: list[str],
+    config: RunnableConfig | None,
+) -> str | None:
+    model = get_llm("orchestrator")
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        prompt_note_chunks, prompt_raw_chunks = _synthesis_chunks_for_attempt(
+            note_chunks,
+            raw_note_chunks,
+            attempt,
+        )
+        policy_prompt = FINAL_REPORT_PROMPT.format(current_date=today_utc_date())
+        synthesis_payload = _build_synthesis_payload(state, prompt_note_chunks, prompt_raw_chunks)
 
-            # Prefer compressed notes. Raw notes are usually tool-heavy and can overflow the
-            # orchestrator context window, so only include them when no compressed notes exist.
-            if prompt_note_chunks:
-                prompt_raw_chunks = []
-
-            notes_text = join_note_list(prompt_note_chunks) or "[No compressed notes]"
-            raw_notes_text = join_note_list(prompt_raw_chunks) or "[No raw notes]"
-            policy_prompt = FINAL_REPORT_PROMPT.format(
-                current_date=today_utc_date(),
+        try:
+            response = await invoke_runnable_with_config(
+                model,
+                [
+                    SystemMessage(content=policy_prompt),
+                    HumanMessage(content=synthesis_payload),
+                ],
+                config,
             )
-            synthesis_sections = [
-                f"Research brief:\n{state_text_or_none(state.get('research_brief')) or '[Missing brief]'}",
-                f"Compressed notes:\n{notes_text}",
-            ]
-            if prompt_raw_chunks:
-                synthesis_sections.append(f"Raw notes:\n{raw_notes_text}")
-            synthesis_sections.append("Write the final report now.")
-            synthesis_payload = "\n\n".join(synthesis_sections)
-
-            try:
-                response = await invoke_runnable_with_config(
-                    model,
-                    [
-                        SystemMessage(content=policy_prompt),
-                        HumanMessage(content=synthesis_payload),
-                    ],
-                    config,
-                )
-                final_report = state_text_or_none(stringify_tool_output(response))
-                if final_report:
-                    log_runtime_event(
-                        _logger,
-                        "final_report_synthesis_success",
-                        attempt=attempt + 1,
-                        had_compressed_notes=bool(note_chunks),
-                        had_raw_notes=bool(raw_note_chunks),
-                    )
-                    break
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                if attempt + 1 < max_attempts and is_token_limit_error(exc):
-                    log_runtime_event(
-                        _logger,
-                        "final_report_retry_token_limit",
-                        attempt=attempt + 1,
-                        max_attempts=max_attempts,
-                    )
-                    continue
-                _logger.exception("final_report_generation synthesis failed; using fallback text")
+            final_report = state_text_or_none(stringify_tool_output(response))
+            if final_report:
                 log_runtime_event(
                     _logger,
-                    "final_report_fallback_exception",
+                    "final_report_synthesis_success",
                     attempt=attempt + 1,
-                    error=str(exc),
+                    had_compressed_notes=bool(note_chunks),
+                    had_raw_notes=bool(raw_note_chunks),
                 )
-                break
+                return final_report
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if attempt + 1 < max_attempts and is_token_limit_error(exc):
+                log_runtime_event(
+                    _logger,
+                    "final_report_retry_token_limit",
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                )
+                continue
+            _logger.exception("final_report_generation synthesis failed; using fallback text")
+            log_runtime_event(
+                _logger,
+                "final_report_fallback_exception",
+                attempt=attempt + 1,
+                error=str(exc),
+            )
+            break
+    return None
 
+
+def _fallback_report_text(note_chunks: list[str], raw_note_chunks: list[str]) -> str:
+    compressed_fallback = join_note_list(note_chunks)
+    raw_fallback = join_note_list(raw_note_chunks)
+    fallback_source = "compressed_notes"
+    final_report = compressed_fallback
     if not final_report:
-        compressed_fallback = join_note_list(note_chunks)
-        raw_fallback = join_note_list(raw_note_chunks)
-        fallback_source = "compressed_notes"
-        final_report = compressed_fallback
-        if not final_report:
-            fallback_source = "raw_notes"
-            final_report = raw_fallback
-        if not final_report:
-            fallback_source = "default_message"
-            final_report = FALLBACK_FINAL_REPORT
-        log_runtime_event(_logger, "final_report_fallback_activated", source=fallback_source)
+        fallback_source = "raw_notes"
+        final_report = raw_fallback
+    if not final_report:
+        fallback_source = "default_message"
+        final_report = FALLBACK_FINAL_REPORT
+    log_runtime_event(_logger, "final_report_fallback_activated", source=fallback_source)
+    return final_report
 
-    final_report = _sanitize_final_report_text(final_report)
-    final_report = _ensure_source_transparency_markers(
-        final_report,
+
+def _finalize_report_text(
+    final_report: str | None,
+    note_chunks: list[str],
+    raw_note_chunks: list[str],
+    evidence_ledger: list[EvidenceRecord],
+) -> str:
+    report_text = final_report or _fallback_report_text(note_chunks, raw_note_chunks)
+    report_text = _sanitize_final_report_text(report_text)
+    return _ensure_source_transparency_markers(
+        report_text,
         note_chunks,
         raw_note_chunks,
         evidence_ledger,
     )
 
+
+def _final_report_update(final_report: str) -> dict[str, Any]:
     return {
         "messages": [AIMessage(content=final_report)],
         "final_report": final_report,
         "intake_decision": "proceed",
         "awaiting_clarification": False,
     }
+
+
+async def final_report_generation(
+    state: ResearchState,
+    config: RunnableConfig = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    """Create final report from supervisor outputs when not already completed."""
+    note_chunks, raw_note_chunks, evidence_ledger = _normalized_report_inputs(state)
+    final_report = state_text_or_none(state.get("final_report"))
+
+    if not final_report:
+        note_chunks = _seed_compressed_notes(note_chunks, raw_note_chunks)
+        final_report = await _synthesize_with_retries(state, note_chunks, raw_note_chunks, config)
+
+    final_report = _finalize_report_text(
+        final_report,
+        note_chunks,
+        raw_note_chunks,
+        evidence_ledger,
+    )
+    return _final_report_update(final_report)

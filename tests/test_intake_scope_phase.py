@@ -5,48 +5,7 @@ from unittest.mock import AsyncMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-
-class _FakeStructuredRunner:
-    def __init__(self, owner, schema_name):
-        self._owner = owner
-        self._schema_name = schema_name
-
-    async def ainvoke(self, messages, config=None):
-        del config
-        self._owner.structured_calls.append((self._schema_name, messages))
-        responses = self._owner.structured_responses.get(self._schema_name, [])
-        if not responses:
-            raise AssertionError(f"No fake response configured for schema {self._schema_name}")
-        response = responses.pop(0)
-        if isinstance(response, BaseException):
-            raise response
-        return response
-
-
-class _FakeLLM:
-    def __init__(self, *, structured_responses=None, freeform_responses=None):
-        self.structured_responses = {
-            key: list(value) for key, value in (structured_responses or {}).items()
-        }
-        self.freeform_responses = list(freeform_responses or [])
-        self.structured_calls = []
-        self.freeform_calls = []
-
-    def with_structured_output(self, schema):
-        return _FakeStructuredRunner(self, schema.__name__)
-
-    def bind_tools(self, _tools):
-        return self
-
-    async def ainvoke(self, messages, config=None):
-        del config
-        self.freeform_calls.append(messages)
-        if not self.freeform_responses:
-            return AIMessage(content="fallback freeform output")
-        response = self.freeform_responses.pop(0)
-        if isinstance(response, BaseException):
-            raise response
-        return response
+from tests._fakes import FakeLLM
 
 
 def _load_graph_module():
@@ -62,7 +21,7 @@ def _thread_config(thread_id: str) -> dict[str, dict[str, str]]:
 def test_scope_intake_runs_intake_on_first_turn(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -97,7 +56,7 @@ def test_scope_intake_runs_intake_on_first_turn(monkeypatch):
 def test_scope_intake_blocks_broad_request_without_boundary_before_model_call(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -134,7 +93,7 @@ def test_scope_intake_offers_plan_checkpoint_for_broad_request_with_scope(monkey
     """ClarifyWithUser runs first; when it says proceed on a broad query, a plan is shown."""
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -181,7 +140,7 @@ def test_scope_intake_proceeds_after_plan_checkpoint_confirmation(monkeypatch):
     triggers fast path — regenerate brief from full conversation and proceed."""
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ResearchBrief": [
                 SimpleNamespace(research_brief="U.S. bankruptcy-risk stock screen from Feb 2026 onward.")
@@ -227,7 +186,7 @@ def test_scope_intake_fast_path_requires_clarify_state(monkeypatch):
     """
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -265,7 +224,7 @@ def test_scope_intake_fast_path_requires_clarify_state(monkeypatch):
 def test_scope_intake_bypasses_clarify_after_proceed(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ResearchBrief": [SimpleNamespace(research_brief="Follow-up brief for supervisor.")],
         }
@@ -297,7 +256,7 @@ def test_scope_intake_bypasses_clarify_after_proceed(monkeypatch):
 def test_scope_intake_rechecks_intent_for_topic_shift_follow_up(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -331,7 +290,7 @@ def test_scope_intake_rechecks_intent_for_topic_shift_follow_up(monkeypatch):
 def test_scope_intake_topic_shift_clarify_hard_resets_prior_state(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -375,7 +334,7 @@ def test_scope_intake_topic_shift_clarify_hard_resets_prior_state(monkeypatch):
 def test_scope_intake_keeps_same_topic_follow_up_with_new_as_proceed(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -411,7 +370,7 @@ def test_app_stops_at_clarification_when_needed(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -444,7 +403,7 @@ def test_app_multi_turn_clarify_then_proceed_uses_message_history(monkeypatch):
     intake = importlib.import_module("deepresearch.intake")
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -507,7 +466,7 @@ def test_app_multi_turn_clarify_then_proceed_uses_message_history(monkeypatch):
 def test_scope_intake_initializes_supervisor_state(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ResearchBrief": [SimpleNamespace(research_brief="Detailed brief for supervision.")]
         }
@@ -623,7 +582,7 @@ def test_supervisor_finalize_marks_completion_when_research_complete_called(monk
 def test_final_report_generation_uses_model_output(monkeypatch):
     graph = _load_graph_module()
     report = importlib.import_module("deepresearch.report")
-    llm = _FakeLLM(freeform_responses=[AIMessage(content="Final report with citations [1].")])
+    llm = FakeLLM(freeform_responses=[AIMessage(content="Final report with citations [1].")])
     monkeypatch.setattr(report, "get_llm", lambda role: llm)
 
     result = asyncio.run(
@@ -645,7 +604,7 @@ def test_final_report_generation_uses_model_output(monkeypatch):
 def test_final_report_generation_retries_on_token_limit_then_succeeds(monkeypatch):
     graph = _load_graph_module()
     report = importlib.import_module("deepresearch.report")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         freeform_responses=[
             RuntimeError("context length exceeded"),
             AIMessage(content="Recovered report"),
@@ -673,7 +632,7 @@ def test_app_proceed_flow_runs_supervisor_and_final_report(monkeypatch):
     intake = importlib.import_module("deepresearch.intake")
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(

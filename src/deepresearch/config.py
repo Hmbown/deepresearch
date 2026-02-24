@@ -24,6 +24,7 @@ DEFAULT_ENABLE_ONLINE_EVALS = False
 DEFAULT_OPENAI_USE_RESPONSES_API = True
 DEFAULT_OPENAI_USE_PREVIOUS_RESPONSE_ID = False
 DEFAULT_OPENAI_OUTPUT_VERSION = "responses/v1"
+ModelRole = Literal["orchestrator", "subagent"]
 
 
 class SearchProviderConfigError(RuntimeError):
@@ -77,11 +78,13 @@ def get_max_researcher_iterations() -> int:
     return _resolve_int_env("MAX_RESEARCHER_ITERATIONS", DEFAULT_MAX_RESEARCHER_ITERATIONS, minimum=1)
 
 
-def _resolve_model_for_role(role: str) -> str:
+def _resolve_model_for_role(role: ModelRole) -> str:
     """Resolve model string for orchestrator vs subagent roles."""
     if role == "orchestrator":
         return os.environ.get("ORCHESTRATOR_MODEL", DEFAULT_ORCHESTRATOR_MODEL)
-    return os.environ.get("SUBAGENT_MODEL", DEFAULT_SUBAGENT_MODEL)
+    if role == "subagent":
+        return os.environ.get("SUBAGENT_MODEL", DEFAULT_SUBAGENT_MODEL)
+    raise ValueError(f"Unsupported model role: {role!r}")
 
 
 def get_search_provider() -> Literal["exa", "tavily", "none"]:
@@ -91,7 +94,7 @@ def get_search_provider() -> Literal["exa", "tavily", "none"]:
     supported = ", ".join(SUPPORTED_SEARCH_PROVIDERS)
     raise SearchProviderConfigError(
         f"Invalid SEARCH_PROVIDER={provider!r}. Supported values: {supported}. "
-        "Set SEARCH_PROVIDER=exa (default), SEARCH_PROVIDER=tavily, or SEARCH_PROVIDER=none."
+        "Set SEARCH_PROVIDER=tavily (default), SEARCH_PROVIDER=exa, or SEARCH_PROVIDER=none."
     )
 
 
@@ -160,15 +163,15 @@ def _load_exa_search_results_class():
     return ExaSearchResults
 
 
-def _load_tavily_search_results_class():
+def _load_tavily_search_class():
     try:
-        from langchain_tavily import TavilySearchResults
+        from langchain_tavily import TavilySearch
     except ImportError as exc:
         raise SearchProviderConfigError(
             "SEARCH_PROVIDER is set to 'tavily' but dependency 'langchain-tavily' is unavailable. "
             "Install project dependencies (`pip install -e .`) or set SEARCH_PROVIDER=none."
         ) from exc
-    return TavilySearchResults
+    return TavilySearch
 
 
 def validate_search_provider_configuration() -> str:
@@ -183,11 +186,11 @@ def validate_search_provider_configuration() -> str:
         return "Search provider ready (`SEARCH_PROVIDER=exa`)."
 
     _resolve_required_tavily_key()
-    _load_tavily_search_results_class()
+    _load_tavily_search_class()
     return "Search provider ready (`SEARCH_PROVIDER=tavily`)."
 
 
-def get_model_string(role: str = "orchestrator") -> str:
+def get_model_string(role: ModelRole = "orchestrator") -> str:
     """Return the raw provider:model string (e.g. ``"openai:gpt-5.2"``).
 
     Useful for callers like ``create_deep_agent()`` that accept model strings
@@ -196,7 +199,7 @@ def get_model_string(role: str = "orchestrator") -> str:
     return _resolve_model_for_role(role)
 
 
-def get_llm(role: str = "orchestrator"):
+def get_llm(role: ModelRole = "orchestrator"):
     """Return a ChatModel for 'orchestrator' or 'subagent' role.
 
     Controlled by ORCHESTRATOR_MODEL and SUBAGENT_MODEL.
@@ -235,6 +238,6 @@ def get_search_tool():
         # ExaSearchResults is configured primarily at invocation time.
         return exa_search_cls(exa_api_key=exa_key)
 
-    tavily_key = _resolve_required_tavily_key()
-    tavily_search_cls = _load_tavily_search_results_class()
-    return tavily_search_cls(api_key=tavily_key)
+    _resolve_required_tavily_key()  # validate key exists before constructing
+    tavily_search_cls = _load_tavily_search_class()
+    return tavily_search_cls()  # reads TAVILY_API_KEY from env

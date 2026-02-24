@@ -6,64 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
-
-class _FakeStructuredRunner:
-    def __init__(self, owner, schema_name):
-        self._owner = owner
-        self._schema_name = schema_name
-
-    async def ainvoke(self, messages, config=None):
-        del config
-        self._owner.structured_calls.append((self._schema_name, messages))
-        queue = self._owner.structured_responses.get(self._schema_name, [])
-        if not queue:
-            raise AssertionError(f"No fake response configured for schema {self._schema_name}")
-        response = queue.pop(0)
-        if isinstance(response, BaseException):
-            raise response
-        return response
-
-
-class _FakeLLM:
-    def __init__(self, *, structured_responses=None, freeform_responses=None):
-        self.structured_responses = {
-            name: list(values) for name, values in (structured_responses or {}).items()
-        }
-        self.freeform_responses = list(freeform_responses or [])
-        self.structured_calls = []
-        self.freeform_calls = []
-
-    def with_structured_output(self, schema):
-        return _FakeStructuredRunner(self, schema.__name__)
-
-    def bind_tools(self, _tools):
-        return self
-
-    async def ainvoke(self, messages, config=None):
-        del config
-        self.freeform_calls.append(messages)
-        if not self.freeform_responses:
-            return AIMessage(content="fallback freeform output")
-        response = self.freeform_responses.pop(0)
-        if isinstance(response, BaseException):
-            raise response
-        return response
-
-
-class _FakeSupervisorGraph:
-    def __init__(self, responses):
-        self._responses = list(responses)
-        self.calls = 0
-
-    async def ainvoke(self, payload, config=None):
-        del payload, config
-        self.calls += 1
-        if not self._responses:
-            return {}
-        response = self._responses.pop(0)
-        if isinstance(response, BaseException):
-            raise response
-        return response
+from tests._fakes import FakeLLM, FakeSupervisorGraph
 
 
 def _thread_config(thread_id: str) -> dict:
@@ -81,7 +24,7 @@ def test_persisted_thread_checkpointer_clarify_then_proceed(monkeypatch):
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
 
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -99,7 +42,7 @@ def test_persisted_thread_checkpointer_clarify_then_proceed(monkeypatch):
         },
         freeform_responses=[AIMessage(content="Final synthesized answer [1].")],
     )
-    supervisor_graph = _FakeSupervisorGraph(
+    supervisor_graph = FakeSupervisorGraph(
         responses=[
             {
                 "supervisor_messages": [HumanMessage(content="Semiconductor datacenter GPU brief.")],
@@ -139,7 +82,7 @@ def test_persisted_thread_topic_shift_resets_state_without_stale_note_leakage(mo
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
 
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -157,7 +100,7 @@ def test_persisted_thread_topic_shift_resets_state_without_stale_note_leakage(mo
         },
         freeform_responses=[AIMessage(content="First run final report [1].")],
     )
-    supervisor_graph = _FakeSupervisorGraph(
+    supervisor_graph = FakeSupervisorGraph(
         responses=[
             {
                 "supervisor_messages": [HumanMessage(content="Generative AI healthcare adoption brief.")],
@@ -207,7 +150,7 @@ def test_persisted_follow_up_continuity_resets_handoff_notes_before_new_supervis
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
 
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -226,7 +169,7 @@ def test_persisted_follow_up_continuity_resets_handoff_notes_before_new_supervis
             AIMessage(content="Second final answer [2]."),
         ],
     )
-    supervisor_graph = _FakeSupervisorGraph(
+    supervisor_graph = FakeSupervisorGraph(
         responses=[
             {
                 "supervisor_messages": [HumanMessage(content="Battery recycling policy trends brief.")],
@@ -277,7 +220,7 @@ def test_persisted_thread_evidence_ledger_continuity(monkeypatch):
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
 
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -292,7 +235,7 @@ def test_persisted_thread_evidence_ledger_continuity(monkeypatch):
         },
         freeform_responses=[AIMessage(content="Report with evidence [1][2].")],
     )
-    supervisor_graph_mock = _FakeSupervisorGraph(
+    supervisor_graph_mock = FakeSupervisorGraph(
         responses=[
             {
                 "supervisor_messages": [HumanMessage(content="Evidence ledger test brief.")],
@@ -358,7 +301,7 @@ def test_sqlite_checkpointer_clarify_then_proceed(monkeypatch, tmp_path):
     report = importlib.import_module("deepresearch.report")
     supervisor_subgraph = importlib.import_module("deepresearch.supervisor_subgraph")
 
-    llm = _FakeLLM(
+    llm = FakeLLM(
         structured_responses={
             "ClarifyWithUser": [
                 SimpleNamespace(
@@ -376,7 +319,7 @@ def test_sqlite_checkpointer_clarify_then_proceed(monkeypatch, tmp_path):
         },
         freeform_responses=[AIMessage(content="SQLite checkpointed answer [1].")],
     )
-    supervisor_graph_mock = _FakeSupervisorGraph(
+    supervisor_graph_mock = FakeSupervisorGraph(
         responses=[
             {
                 "supervisor_messages": [HumanMessage(content="SQLite test brief.")],

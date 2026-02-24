@@ -97,7 +97,11 @@ def test_researcher_deep_agent_loop_preserves_sources(monkeypatch):
     assert any("https://example.com/source-a" in note for note in raw_notes)
     assert any("[1]" in note or "[2]" in note for note in raw_notes)
     assert evidence_ledger
-    assert any(record.source_urls for record in evidence_ledger)
+    urls = {url for record in evidence_ledger for url in record.source_urls}
+    assert urls == {
+        "https://example.com/source-a",
+        "https://example.com/source-b",
+    }
     assert compressed is not None
     assert "[1]" in compressed or "https://example.com/source-a" in compressed
 

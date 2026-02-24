@@ -71,12 +71,11 @@ def _get_user_query(run: Run) -> str:
 
 
 def _run_judge(prompt_template: str, inputs: str, outputs: str) -> tuple[float | None, str]:
-    """Run an LLM-as-judge evaluation and return (score, reasoning).
-
-    Uses openevals create_llm_as_judge for structured scoring.
-    Falls back to direct model invocation if openevals is unavailable.
-    """
-    from openevals.llm import create_llm_as_judge
+    """Run an LLM-as-judge evaluation via openevals and return (score, reasoning)."""
+    try:
+        from openevals.llm import create_llm_as_judge
+    except ImportError as exc:
+        raise RuntimeError("openevals is required for online evaluations.") from exc
 
     judge = create_llm_as_judge(
         prompt=prompt_template,
@@ -94,6 +93,141 @@ def _run_judge(prompt_template: str, inputs: str, outputs: str) -> tuple[float |
     if score is not None:
         score = max(0.0, min(1.0, float(score)))
     return score, reasoning
+
+
+def _normalize_run_name(raw_name: Any) -> str:
+    if not isinstance(raw_name, str):
+        return ""
+    return raw_name.rsplit("/", 1)[-1].rsplit(":", 1)[-1].rsplit(".", 1)[-1]
+
+
+def _extract_run_name(child_run: Any) -> str:
+    raw_name = getattr(child_run, "name", "")
+    if not raw_name and isinstance(child_run, dict):
+        raw_name = child_run.get("name", "")
+    return _normalize_run_name(raw_name)
+
+
+def _extract_domain(url: str) -> str | None:
+    try:
+        parsed = urlparse(url.strip())
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not parsed.netloc:
+        return None
+    return parsed.netloc
+
+
+def _count_tool_usage(child_runs: list[Any]) -> dict[str, int]:
+    counters = {
+        "conduct_research_count": 0,
+        "search_web_count": 0,
+        "fetch_url_count": 0,
+        "think_tool_count": 0,
+    }
+
+    for child in child_runs:
+        name = _extract_run_name(child)
+        outputs = getattr(child, "outputs", {}) or {}
+
+        if name == "ConductResearch":
+            content = ""
+            if isinstance(outputs, dict):
+                content = str(outputs.get("output", "") or outputs.get("content", ""))
+            elif isinstance(outputs, str):
+                content = outputs
+            if "[ConductResearch skipped:" not in content and "[Research unit failed:" not in content:
+                counters["conduct_research_count"] += 1
+
+        if name == "search_web":
+            counters["search_web_count"] += 1
+
+        if name == "fetch_url":
+            counters["fetch_url_count"] += 1
+
+        if name == "think_tool":
+            counters["think_tool_count"] += 1
+
+    return counters
+
+
+def _collect_source_domains(child_runs: list[Any]) -> set[str]:
+    source_domains: set[str] = set()
+    for child in child_runs:
+        name = _extract_run_name(child)
+        inputs = getattr(child, "inputs", {}) or {}
+        outputs = getattr(child, "outputs", {}) or {}
+
+        if name == "search_web":
+            if isinstance(outputs, str):
+                results = outputs
+            elif isinstance(outputs, list):
+                results = outputs
+            elif isinstance(outputs, dict):
+                results = outputs.get("results", [])
+            else:
+                results = []
+
+            if isinstance(results, str):
+                urls = re.findall(r"https?://[^\s\]\"']+", results)
+                for url in urls:
+                    domain = _extract_domain(url)
+                    if domain:
+                        source_domains.add(domain)
+            elif isinstance(results, list):
+                for item in results:
+                    url = item.get("url", "") if isinstance(item, dict) else ""
+                    if not url:
+                        continue
+                    domain = _extract_domain(url)
+                    if domain:
+                        source_domains.add(domain)
+
+        if name == "fetch_url":
+            url = ""
+            if isinstance(inputs, dict):
+                url = str(inputs.get("url", "") or inputs.get("input", ""))
+            if not url:
+                continue
+            domain = _extract_domain(url)
+            if domain:
+                source_domains.add(domain)
+
+    return source_domains
+
+
+def _collect_observed_run_names(child_runs: list[Any]) -> set[str]:
+    observed_names: set[str] = set()
+    for child in child_runs:
+        name = _extract_run_name(child)
+        if name:
+            observed_names.add(name)
+    return observed_names
+
+
+def _render_process_summary(
+    counters: dict[str, int],
+    source_domains: set[str],
+    observed_names: set[str],
+) -> str:
+    sorted_domains = sorted(source_domains)
+    domains_str = ", ".join(sorted_domains[:20]) if sorted_domains else "(none)"
+    config_lines = (
+        f"- Runtime config: max_react_tool_calls={get_max_react_tool_calls()}, "
+        f"max_concurrent_research_units={get_max_concurrent_research_units()}, "
+        f"max_researcher_iterations={get_max_researcher_iterations()}\n"
+        f"- Observed child run names: {', '.join(sorted(observed_names)) or '(none)'}\n"
+    )
+
+    return (
+        f"Research Process Summary:\n"
+        f"- ConductResearch units dispatched: {counters['conduct_research_count']}\n"
+        f"- search_web calls: {counters['search_web_count']}\n"
+        f"- fetch_url calls: {counters['fetch_url_count']}\n"
+        f"- think_tool calls: {counters['think_tool_count']}\n"
+        f"{config_lines}"
+        f"- Unique source domains ({len(source_domains)}): {domains_str}\n"
+    )
 
 
 def eval_answer_quality(run: Run, example: Any = None) -> dict[str, Any]:
@@ -121,101 +255,10 @@ def eval_answer_quality(run: Run, example: Any = None) -> dict[str, Any]:
 
 def _build_process_summary(child_runs: list[Any]) -> str:
     """Build a text summary of the research process from child runs."""
-    conduct_research_count = 0
-    search_web_count = 0
-    fetch_url_count = 0
-    think_tool_count = 0
-    source_domains: set[str] = set()
-    observed_names: set[str] = set()
-
-    def _normalize_run_name(raw_name: Any) -> str:
-        if not isinstance(raw_name, str):
-            return ""
-        return raw_name.rsplit("/", 1)[-1].rsplit(":", 1)[-1].rsplit(".", 1)[-1]
-
-    def _extract_domain(url: str) -> str | None:
-        try:
-            parsed = urlparse(url.strip())
-        except Exception:
-            return None
-        if not parsed.netloc:
-            return None
-        return parsed.netloc
-
-    for child in child_runs:
-        raw_name = getattr(child, "name", "")
-        if not raw_name and isinstance(child, dict):
-            raw_name = child.get("name", "")
-        name = _normalize_run_name(raw_name)
-        if name:
-            observed_names.add(name)
-        inputs = getattr(child, "inputs", {}) or {}
-        outputs = getattr(child, "outputs", {}) or {}
-
-        if name == "ConductResearch":
-            content = ""
-            if isinstance(outputs, dict):
-                content = str(outputs.get("output", "") or outputs.get("content", ""))
-            elif isinstance(outputs, str):
-                content = outputs
-            if "[ConductResearch skipped:" not in content and "[Research unit failed:" not in content:
-                conduct_research_count += 1
-
-        if name == "search_web":
-            search_web_count += 1
-            if isinstance(outputs, str):
-                results = outputs
-            elif isinstance(outputs, list):
-                results = outputs
-            elif isinstance(outputs, dict):
-                results = outputs.get("results", [])
-            else:
-                results = []
-            if isinstance(results, str):
-                urls = re.findall(r"https?://[^\s\]\"']+", results)
-                for url in urls:
-                    domain = _extract_domain(url)
-                    if domain:
-                        source_domains.add(domain)
-            elif isinstance(results, list):
-                for item in results:
-                    url = item.get("url", "") if isinstance(item, dict) else ""
-                    if url:
-                        domain = _extract_domain(url)
-                        if domain:
-                            source_domains.add(domain)
-
-        if name == "fetch_url":
-            fetch_url_count += 1
-            url = ""
-            if isinstance(inputs, dict):
-                url = str(inputs.get("url", "") or inputs.get("input", ""))
-            if url:
-                domain = _extract_domain(url)
-                if domain:
-                    source_domains.add(domain)
-
-        if name == "think_tool":
-            think_tool_count += 1
-
-    sorted_domains = sorted(source_domains)
-    domains_str = ", ".join(sorted_domains[:20]) if sorted_domains else "(none)"
-    config_lines = (
-        f"- Runtime config: max_react_tool_calls={get_max_react_tool_calls()}, "
-        f"max_concurrent_research_units={get_max_concurrent_research_units()}, "
-        f"max_researcher_iterations={get_max_researcher_iterations()}\n"
-        f"- Observed child run names: {', '.join(sorted(observed_names)) or '(none)'}\n"
-    )
-
-    return (
-        f"Research Process Summary:\n"
-        f"- ConductResearch units dispatched: {conduct_research_count}\n"
-        f"- search_web calls: {search_web_count}\n"
-        f"- fetch_url calls: {fetch_url_count}\n"
-        f"- think_tool calls: {think_tool_count}\n"
-        f"{config_lines}"
-        f"- Unique source domains ({len(source_domains)}): {domains_str}\n"
-    )
+    counters = _count_tool_usage(child_runs)
+    source_domains = _collect_source_domains(child_runs)
+    observed_names = _collect_observed_run_names(child_runs)
+    return _render_process_summary(counters, source_domains, observed_names)
 
 
 def eval_process_quality(run: Run, client: Any) -> dict[str, Any]:
