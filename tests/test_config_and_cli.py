@@ -167,9 +167,9 @@ def test_runtime_env_overrides_are_respected(monkeypatch):
     assert config.get_max_researcher_iterations() == 7
 
 
-def test_get_search_provider_defaults_to_exa(monkeypatch):
+def test_get_search_provider_defaults_to_tavily(monkeypatch):
     monkeypatch.delenv("SEARCH_PROVIDER", raising=False)
-    assert config.get_search_provider() == "exa"
+    assert config.get_search_provider() == "tavily"
 
 
 def test_get_search_provider_rejects_invalid_value(monkeypatch):

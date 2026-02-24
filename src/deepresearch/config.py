@@ -12,7 +12,7 @@ from langchain.chat_models import init_chat_model
 
 DEFAULT_ORCHESTRATOR_MODEL = "openai:gpt-5.2"
 DEFAULT_SUBAGENT_MODEL = "openai:gpt-5.2"
-DEFAULT_SEARCH_PROVIDER = "exa"
+DEFAULT_SEARCH_PROVIDER = "tavily"
 SUPPORTED_SEARCH_PROVIDERS = ("exa", "tavily", "none")
 DEFAULT_MAX_STRUCTURED_OUTPUT_RETRIES = 3
 DEFAULT_MAX_REACT_TOOL_CALLS = 40

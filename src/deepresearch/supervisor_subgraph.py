@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.messages.utils import convert_to_messages
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send
+from langgraph.types import Command, Send
 
 from .config import (
     get_llm,
@@ -318,6 +318,29 @@ def route_supervisor_prepare(
     return "supervisor_finalize"
 
 
+def research_barrier(state: SupervisorState) -> Command[Literal["supervisor_finalize"]]:
+    """Wait until all dispatched research units in the current wave have returned."""
+    dispatched_research_units = _coerce_non_negative_int(state.get("pending_dispatched_research_units", 0))
+    if dispatched_research_units <= 0:
+        return Command(goto="supervisor_finalize")
+
+    summaries_raw = state.get("research_unit_summaries")
+    summaries = summaries_raw if isinstance(summaries_raw, list) else []
+    consumed = _coerce_non_negative_int(state.get("research_unit_summaries_consumed", 0))
+    completed_research_units = max(0, len(summaries) - consumed)
+
+    if completed_research_units < dispatched_research_units:
+        log_runtime_event(
+            _logger,
+            "supervisor_research_barrier_waiting",
+            completed_research_units=completed_research_units,
+            dispatched_research_units=dispatched_research_units,
+        )
+        return Command(update={})
+
+    return Command(goto="supervisor_finalize")
+
+
 async def run_research_unit(state: dict[str, Any]) -> dict[str, Any]:
     """Execute one ConductResearch call from Send fan-out."""
     call = state.get("research_call") if isinstance(state, dict) else None
@@ -610,6 +633,7 @@ def build_supervisor_subgraph():
     builder.add_node("supervisor", supervisor)
     builder.add_node("supervisor_prepare", supervisor_prepare)
     builder.add_node("run_research_unit", run_research_unit)
+    builder.add_node("research_barrier", research_barrier)
     builder.add_node("supervisor_finalize", supervisor_finalize)
     builder.add_node("supervisor_terminal", supervisor_terminal)
 
@@ -629,7 +653,7 @@ def build_supervisor_subgraph():
             "supervisor_finalize": "supervisor_finalize",
         },
     )
-    builder.add_edge("run_research_unit", "supervisor_finalize")
+    builder.add_edge("run_research_unit", "research_barrier")
     builder.add_conditional_edges(
         "supervisor_finalize",
         supervisor_finalize_route,
