@@ -245,7 +245,7 @@ class ResearchPlan(BaseModel):
 
     scope: str = Field(description="One sentence: what will be researched and any boundaries.")
     research_tracks: list[str] = Field(
-        description="3-6 research tracks. Each track is ONE sentence describing the angle, not the methodology.",
+        description="Research tracks to investigate. Each track is ONE sentence describing the angle, not the methodology.",
     )
     evidence_strategy: str = Field(
         description="One sentence: what source types to prioritize.",

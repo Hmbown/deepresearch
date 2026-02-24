@@ -80,7 +80,7 @@ Today's date is {date}.
 
 Generate a plan with:
 1. Scope: one sentence — what will be researched and any boundaries.
-2. Research tracks: 3-6 tracks, each one sentence. Just the angle/question, not the methodology.
+2. Research tracks: each one sentence. Just the angle/question, not the methodology.
 3. Evidence strategy: one sentence — what source types to prioritize.
 4. Output format: one sentence — what the deliverable looks like.
 
