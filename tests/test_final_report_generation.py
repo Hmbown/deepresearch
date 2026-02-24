@@ -115,6 +115,35 @@ def test_final_report_generation_no_notes_falls_back_with_source_transparency(mo
     assert "No source URLs were available in collected notes." in result["final_report"]
 
 
+def test_final_report_generation_filters_malformed_urls_from_sources(monkeypatch):
+    model = _FakeReportModel([AIMessage(content="Summary with evidence [1].")])
+    monkeypatch.setattr(report, "get_llm", lambda role: model)
+
+    result = asyncio.run(
+        report.final_report_generation(
+            {
+                "research_brief": "Brief",
+                "notes": [
+                    "Valid: https://example.com/source-a",
+                    "Truncated: https://example.com/source-b-",
+                ],
+                "raw_notes": ["Missing host: https:///missing-netloc"],
+                "evidence_ledger": [
+                    {"source_urls": ["https://example.org/source-c", "https://example.net/source-d-"]},
+                ],
+                "final_report": "",
+            }
+        )
+    )
+
+    assert "Sources:" in result["final_report"]
+    assert "https://example.com/source-a" in result["final_report"]
+    assert "https://example.org/source-c" in result["final_report"]
+    assert "https://example.com/source-b-" not in result["final_report"]
+    assert "https://example.net/source-d-" not in result["final_report"]
+    assert "https:///missing-netloc" not in result["final_report"]
+
+
 def test_final_report_generation_does_not_duplicate_existing_markdown_sources_heading(monkeypatch):
     model = _FakeReportModel(
         [

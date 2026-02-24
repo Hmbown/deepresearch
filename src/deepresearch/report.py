@@ -6,11 +6,12 @@ import asyncio
 import logging
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables.config import RunnableConfig
 
-from .config import get_llm, get_supervisor_final_report_max_sections
+from .config import get_llm
 from .prompts import FINAL_REPORT_PROMPT
 from .runtime_utils import invoke_runnable_with_config, log_runtime_event
 from .state import (
@@ -48,14 +49,26 @@ _INTERNAL_META_LINE_PATTERNS = (
 )
 
 
+def _normalize_source_url(raw_url: str) -> str:
+    return str(raw_url).strip().rstrip(".,;")
+
+
+def _is_valid_source_url(raw_url: str) -> bool:
+    normalized = _normalize_source_url(raw_url)
+    if not normalized or normalized.endswith("-"):
+        return False
+    parsed = urlparse(normalized)
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
 def _extract_source_urls(*chunk_groups: list[str]) -> list[str]:
     seen: set[str] = set()
     ordered_urls: list[str] = []
     for chunk_group in chunk_groups:
         for chunk in chunk_group:
             for match in _SOURCE_URL_PATTERN.findall(chunk):
-                url = match.strip().rstrip(".,;")
-                if not url or url in seen:
+                url = _normalize_source_url(match)
+                if not _is_valid_source_url(url) or url in seen:
                     continue
                 seen.add(url)
                 ordered_urls.append(url)
@@ -67,8 +80,8 @@ def _extract_source_urls_from_evidence(evidence_ledger: list[EvidenceRecord]) ->
     ordered_urls: list[str] = []
     for record in evidence_ledger:
         for url in record.source_urls:
-            normalized = str(url).strip().rstrip(".,;")
-            if not normalized or normalized in seen:
+            normalized = _normalize_source_url(url)
+            if not _is_valid_source_url(normalized) or normalized in seen:
                 continue
             seen.add(normalized)
             ordered_urls.append(normalized)
@@ -158,20 +171,24 @@ async def final_report_generation(
                 prompt_note_chunks = note_chunks[:note_limit] if note_limit else []
                 prompt_raw_chunks = raw_note_chunks[:raw_limit] if raw_limit else []
 
+            # Prefer compressed notes. Raw notes are usually tool-heavy and can overflow the
+            # orchestrator context window, so only include them when no compressed notes exist.
+            if prompt_note_chunks:
+                prompt_raw_chunks = []
+
             notes_text = join_note_list(prompt_note_chunks) or "[No compressed notes]"
             raw_notes_text = join_note_list(prompt_raw_chunks) or "[No raw notes]"
             policy_prompt = FINAL_REPORT_PROMPT.format(
                 current_date=today_utc_date(),
-                final_report_max_sections=get_supervisor_final_report_max_sections(),
             )
-            synthesis_payload = "\n\n".join(
-                [
-                    f"Research brief:\n{state_text_or_none(state.get('research_brief')) or '[Missing brief]'}",
-                    f"Compressed notes:\n{notes_text}",
-                    f"Raw notes:\n{raw_notes_text}",
-                    "Write the final report now.",
-                ]
-            )
+            synthesis_sections = [
+                f"Research brief:\n{state_text_or_none(state.get('research_brief')) or '[Missing brief]'}",
+                f"Compressed notes:\n{notes_text}",
+            ]
+            if prompt_raw_chunks:
+                synthesis_sections.append(f"Raw notes:\n{raw_notes_text}")
+            synthesis_sections.append("Write the final report now.")
+            synthesis_payload = "\n\n".join(synthesis_sections)
 
             try:
                 response = await invoke_runnable_with_config(
