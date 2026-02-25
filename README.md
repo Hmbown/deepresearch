@@ -120,13 +120,3 @@ LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=<your-langsmith-api-key>
 LANGCHAIN_PROJECT=deepresearch-local
 ```
-
-## Troubleshooting
-
-| Issue | What to do |
-|---|---|
-| `deepagents` not found | Run `pip install -e .` again |
-| Search credit errors | Set `SEARCH_PROVIDER=none` in `.env` |
-| LangSmith shows no data | Check your billing/quota on the free tier |
-| OpenAI Responses API issues | Check `OPENAI_USE_RESPONSES_API` in `.env.example`. Set to `false` to disable. |
-| Confused about `127.0.0.1:2024` | That's the LangGraph local API, not LangSmith. Don't set `LANGCHAIN_ENDPOINT` to localhost. |
