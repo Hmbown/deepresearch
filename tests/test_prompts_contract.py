@@ -95,6 +95,7 @@ def test_prompt_templates_render_with_expected_keys_and_fail_closed_on_missing_f
     )
     assert prompts.RESEARCHER_PROMPT.format(
         max_react_tool_calls=10,
+        current_date=TEST_DATE,
     )
     assert prompts.FINAL_REPORT_PROMPT.format(current_date=TEST_DATE)
     assert prompts.RESEARCH_PLAN_PROMPT.format(research_brief="brief", date=TEST_DATE, max_research_tracks=4)

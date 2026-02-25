@@ -145,7 +145,7 @@ def test_extract_research_from_messages_empty():
 
 
 def test_render_researcher_prompt_includes_tool_contract():
-    prompt = researcher_subgraph.render_researcher_prompt()
+    prompt = researcher_subgraph.render_researcher_prompt(current_date="2026-02-25")
 
     assert "search_web" in prompt
     assert "fetch_url" in prompt

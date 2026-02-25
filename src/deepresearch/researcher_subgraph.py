@@ -13,7 +13,7 @@ from .config import (
 )
 from .nodes import _build_fetch_url_tool, _build_search_tool_with_processing, think_tool
 from .prompts import RESEARCHER_PROMPT
-from .state import EvidenceRecord, EvidenceSourceType, state_text_or_none, stringify_tool_output
+from .state import EvidenceRecord, EvidenceSourceType, state_text_or_none, stringify_tool_output, today_utc_date
 
 try:  # pragma: no cover - import is environment-dependent
     from deepagents import create_deep_agent as _deepagents_create_deep_agent
@@ -54,15 +54,18 @@ def _build_research_tools_and_capabilities(
     return tools
 
 
-def render_researcher_prompt() -> str:
-    return RESEARCHER_PROMPT.format(max_react_tool_calls=get_max_react_tool_calls())
+def render_researcher_prompt(current_date: str) -> str:
+    return RESEARCHER_PROMPT.format(
+        max_react_tool_calls=get_max_react_tool_calls(),
+        current_date=current_date,
+    )
 
 
 def build_researcher_subgraph():
     """Build a deep-agent researcher with built-in middleware."""
     model = get_llm("subagent", prefer_compact_context=True)
     tools = _build_research_tools_and_capabilities()
-    system_prompt = render_researcher_prompt()
+    system_prompt = render_researcher_prompt(current_date=today_utc_date())
     create_agent = _resolve_create_deep_agent()
 
     return create_agent(

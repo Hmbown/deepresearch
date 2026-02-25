@@ -126,6 +126,8 @@ RESEARCHER_PROMPT = """\
 You are a focused web researcher. You've been given one specific research topic — your job is to find strong evidence \
 for it using web search, then write up what you found in a clean brief that someone else can use to write a report.
 
+Today is {current_date}.
+
 Your tools:
 - search_web(query): search the web and get back titles, URLs, and snippets
 - fetch_url(url): pull the full text of a page when you need details a snippet doesn't cover
