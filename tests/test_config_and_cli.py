@@ -126,6 +126,57 @@ def test_get_llm_can_enable_openai_responses_api(monkeypatch):
     assert captured["kwargs"] == llm
 
 
+def test_get_llm_prefer_compact_context_enables_previous_response_id(monkeypatch):
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("SUBAGENT_MODEL", "openai:gpt-test-mini")
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "true")
+    monkeypatch.setenv("OPENAI_USE_PREVIOUS_RESPONSE_ID", "false")
+
+    llm = config.get_llm("subagent", prefer_compact_context=True)
+    assert llm["use_previous_response_id"] is True
+    assert captured["kwargs"] == llm
+
+
+def test_get_llm_prefer_compact_context_noop_for_non_openai_provider(monkeypatch):
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("SUBAGENT_MODEL", "anthropic:claude-opus-4-6")
+    monkeypatch.delenv("OPENAI_USE_RESPONSES_API", raising=False)
+
+    llm = config.get_llm("subagent", prefer_compact_context=True)
+    assert "use_previous_response_id" not in llm
+    assert "use_responses_api" not in llm
+    assert llm == {"model": "anthropic:claude-opus-4-6"}
+
+
+def test_get_llm_prefer_compact_context_inert_when_responses_api_disabled(monkeypatch):
+    captured = {}
+
+    def fake_init_chat_model(**kwargs):
+        captured["kwargs"] = kwargs
+        return kwargs
+
+    monkeypatch.setattr(config, "init_chat_model", fake_init_chat_model)
+    monkeypatch.setenv("SUBAGENT_MODEL", "openai:gpt-test-mini")
+    monkeypatch.setenv("OPENAI_USE_RESPONSES_API", "false")
+
+    llm = config.get_llm("subagent", prefer_compact_context=True)
+    assert "use_previous_response_id" not in llm
+    assert "use_responses_api" not in llm
+    assert llm == {"model": "openai:gpt-test-mini"}
+
+
 def test_get_llm_openai_responses_flag_falls_back_when_kwargs_unsupported(monkeypatch):
     calls: list[dict] = []
 

@@ -59,6 +59,8 @@ def test_researcher_subgraph_uses_deep_agent(monkeypatch):
     agent = researcher_subgraph.build_researcher_subgraph()
     assert hasattr(agent, "ainvoke")
     assert captured["kwargs"]["name"] == "deep-researcher"
+    # model should be a pre-configured ChatModel, not a raw string
+    assert not isinstance(captured["kwargs"]["model"], str)
 
 
 def test_build_app_accepts_optional_checkpointer():

@@ -430,13 +430,13 @@ def validate_search_provider_configuration() -> str:
 def get_model_string(role: ModelRole = "orchestrator") -> str:
     """Return the raw provider:model string (e.g. ``"openai:gpt-5.2"``).
 
-    Useful for callers like ``create_deep_agent()`` that accept model strings
-    directly and apply their own provider-specific handling.
+    Callers that need a pre-configured ChatModel with Responses API flags
+    should use ``get_llm()`` instead.
     """
     return _resolve_model_for_role(role)
 
 
-def get_llm(role: ModelRole = "orchestrator"):
+def get_llm(role: ModelRole = "orchestrator", *, prefer_compact_context: bool = False):
     """Return a ChatModel for 'orchestrator' or 'subagent' role.
 
     Controlled by ORCHESTRATOR_MODEL and SUBAGENT_MODEL.
@@ -450,7 +450,7 @@ def get_llm(role: ModelRole = "orchestrator"):
         output_version = get_openai_output_version()
         if output_version:
             init_kwargs["output_version"] = output_version
-        if openai_use_previous_response_id_enabled():
+        if openai_use_previous_response_id_enabled() or prefer_compact_context:
             init_kwargs["use_previous_response_id"] = True
 
     try:

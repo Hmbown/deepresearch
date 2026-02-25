@@ -8,11 +8,11 @@ from urllib.parse import urlparse
 
 from .config import (
     get_max_react_tool_calls,
-    get_model_string,
+    get_llm,
     get_search_tool,
 )
 from .nodes import _build_fetch_url_tool, _build_search_tool_with_processing, think_tool
-from .prompts import RESEARCHER_PROMPT, RESEARCHER_PROMPT_NO_SEARCH
+from .prompts import RESEARCHER_PROMPT
 from .state import EvidenceRecord, EvidenceSourceType, state_text_or_none, stringify_tool_output
 
 try:  # pragma: no cover - import is environment-dependent
@@ -45,29 +45,28 @@ def _resolve_create_deep_agent():
 
 def _build_research_tools_and_capabilities(
     writer: Any | None = None,
-) -> tuple[list[Any], bool]:
+) -> list[Any]:
     base_search_tool = get_search_tool()
     fetch_url_tool = _build_fetch_url_tool(writer)
     tools = [think_tool, fetch_url_tool]
     if base_search_tool is not None:
         tools.insert(0, _build_search_tool_with_processing(base_search_tool, writer))
-    return tools, base_search_tool is not None
+    return tools
 
 
-def render_researcher_prompt(*, search_enabled: bool = True) -> str:
-    prompt_template = RESEARCHER_PROMPT if search_enabled else RESEARCHER_PROMPT_NO_SEARCH
-    return prompt_template.format(max_react_tool_calls=get_max_react_tool_calls())
+def render_researcher_prompt() -> str:
+    return RESEARCHER_PROMPT.format(max_react_tool_calls=get_max_react_tool_calls())
 
 
 def build_researcher_subgraph():
     """Build a deep-agent researcher with built-in middleware."""
-    model_str = get_model_string("subagent")
-    tools, search_enabled = _build_research_tools_and_capabilities()
-    system_prompt = render_researcher_prompt(search_enabled=search_enabled)
+    model = get_llm("subagent", prefer_compact_context=True)
+    tools = _build_research_tools_and_capabilities()
+    system_prompt = render_researcher_prompt()
     create_agent = _resolve_create_deep_agent()
 
     return create_agent(
-        model=model_str,
+        model=model,
         tools=tools,
         system_prompt=system_prompt,
         name="deep-researcher",

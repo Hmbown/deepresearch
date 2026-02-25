@@ -23,7 +23,7 @@ You'll need **Python 3.11+** and an **OpenAI API key**. By default, search uses 
 The pipeline has three stages:
 
 1. **scope_intake** — figures out what you're actually asking. If the question is vague, it asks for clarification before doing any research.
-2. **research_supervisor** — breaks the question into parallel research tracks, dispatches researcher agents via LangGraph `Send`, waits at a barrier, then decides whether to iterate or move on.
+2. **research_supervisor** — breaks the question into parallel research tracks, dispatches deep-agent researchers via LangGraph `Send`, waits at a barrier, then decides whether to iterate or move on. Researchers use compact-context continuation (`use_previous_response_id`) on OpenAI models to keep long tool traces efficient.
 3. **final_report** — takes all the collected evidence and notes and synthesizes a report with citations.
 
 ## Configuration
@@ -96,12 +96,14 @@ Then go to: `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
 | `state.py` | Shared state, Pydantic schemas, helpers |
 | `intake.py` | Clarification + brief generation with Command routing |
 | `supervisor_subgraph.py` | Parallel research dispatch and iteration loop |
-| `researcher_subgraph.py` | Individual researcher agent with search/fetch/think tools |
+| `researcher_subgraph.py` | Deep-agent researcher (`create_deep_agent`) with search/fetch/think tools |
 | `report.py` | Report synthesis with retries and source citations |
 | `nodes.py` | Tool implementations — search, fetch (SSRF-protected), think |
-| `prompts.py` | All the prompt templates |
-| `config.py` | Model and search provider config |
+| `prompts.py` | All prompt templates (single canonical researcher prompt) |
+| `config.py` | Model, search provider, and OpenAI Responses API config |
 | `env.py` | Env bootstrap and preflight checks |
+| `runtime_utils.py` | Runnable invocation helpers |
+| `message_utils.py` | Message content extraction helpers |
 | `cli.py` | CLI with streaming progress display |
 | `evals/` | LLM-as-judge evaluation framework |
 
@@ -122,5 +124,5 @@ LANGCHAIN_PROJECT=deepresearch-local
 | `deepagents` not found | Run `pip install -e .` again |
 | Search credit errors | Set `SEARCH_PROVIDER=none` in `.env` |
 | LangSmith shows no data | Check your billing/quota on the free tier |
-| OpenAI Responses API issues | Check `OPENAI_USE_RESPONSES_API` in `.env.example` |
+| OpenAI Responses API issues | Check `OPENAI_USE_RESPONSES_API` in `.env.example`. Set to `false` to disable. |
 | Confused about `127.0.0.1:2024` | That's the LangGraph local API, not LangSmith. Don't set `LANGCHAIN_ENDPOINT` to localhost. |
