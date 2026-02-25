@@ -323,10 +323,7 @@ def test_progress_display_no_dispatch_or_gate_output_when_runtime_progress_absen
     )
 
     rendered = stream.getvalue()
-    assert "dispatching" not in rendered
-    assert "Quality gate" not in rendered
-    assert "PASS" not in rendered
-    assert "RETRY" not in rendered
+    assert rendered == ""
 
 
 def test_progress_display_handles_partial_runtime_progress_gracefully():
@@ -346,7 +343,7 @@ def test_progress_display_handles_partial_runtime_progress_gracefully():
 
     rendered = stream.getvalue()
     assert "dispatching 3 researchers in parallel" in rendered
-    assert "Quality gate" not in rendered
+    assert "Supervisor iteration 1: evaluating quality gate." not in rendered
 
 
 def test_progress_display_does_not_derive_dispatch_count_from_tool_call_count():

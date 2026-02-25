@@ -32,6 +32,45 @@ def test_ensure_runtime_env_ready_raises_actionable_error_when_openai_key_missin
         env.ensure_runtime_env_ready()
 
 
+def test_ensure_runtime_env_ready_allows_non_openai_models_with_search_disabled(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setenv("ORCHESTRATOR_MODEL", "anthropic:claude-opus-4-6")
+    monkeypatch.setenv("SUBAGENT_MODEL", "anthropic:claude-sonnet-4-5")
+    monkeypatch.setenv("SEARCH_PROVIDER", "none")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    env.ensure_runtime_env_ready()
+
+
+def test_ensure_runtime_env_ready_requires_openai_key_for_openai_search_provider(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setenv("ORCHESTRATOR_MODEL", "anthropic:claude-opus-4-6")
+    monkeypatch.setenv("SUBAGENT_MODEL", "anthropic:claude-sonnet-4-5")
+    monkeypatch.setenv("SEARCH_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        env.ensure_runtime_env_ready()
+
+
+def test_missing_runtime_env_vars_require_only_provider_specific_key_for_non_openai_models(monkeypatch):
+    monkeypatch.setenv("ORCHESTRATOR_MODEL", "anthropic:claude-opus-4-6")
+    monkeypatch.setenv("SUBAGENT_MODEL", "anthropic:claude-sonnet-4-5")
+    monkeypatch.setenv("SEARCH_PROVIDER", "exa")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+
+    assert env.missing_runtime_env_vars() == ["EXA_API_KEY"]
+
+
 def test_verify_langsmith_auth_returns_clear_missing_key_message(monkeypatch, tmp_path):
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text("", encoding="utf-8")

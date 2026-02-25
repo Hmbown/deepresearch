@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -29,6 +30,19 @@ from .state import (
     latest_human_text,
     should_recheck_intent_on_follow_up,
     today_utc_date,
+)
+
+_PLAN_ACK_NEGATED_POSITIVE_RE = re.compile(r"\b(?:don't|do not|not)\s+(?:start|proceed|continue|launch)\b")
+_PLAN_ACK_STRONG_POSITIVE_RE = re.compile(r"\b(?:start|proceed|continue|launch)\b")
+_PLAN_ACK_GO_AHEAD_RE = re.compile(r"\bgo\s+ahead\b")
+_PLAN_ACK_LENIENT_POSITIVE_RE = re.compile(r"\b(?:yes|yeah|yep|sure|ok|okay)\b")
+_PLAN_ACK_HOLD_OR_REVISE_RE = re.compile(r"\b(?:wait|pause|hold|stop|revise|change|adjust|update|clarify)\b|not yet")
+_PLAN_ACK_POSITIVE_PHRASES = (
+    "sounds good",
+    "looks good",
+    "works for me",
+    "all good",
+    "good to go",
 )
 
 
@@ -137,12 +151,37 @@ def _state_messages(state: ResearchState) -> list[Any]:
     return list(convert_to_messages(state.get("messages", [])))
 
 
-def _is_plan_acknowledgement_turn(state: ResearchState) -> bool:
+def _is_plan_review_turn(state: ResearchState) -> bool:
     return bool(
         state.get("intake_decision") == "clarify"
         and state.get("research_brief")
         and state.get("awaiting_clarification")
     )
+
+
+def _is_plan_acknowledgement_message(messages: list[Any]) -> bool:
+    latest_text = re.sub(r"\s+", " ", latest_human_text(messages).lower()).strip()
+    if not latest_text:
+        return False
+    if _PLAN_ACK_NEGATED_POSITIVE_RE.search(latest_text):
+        return False
+
+    has_revision_or_hold_marker = _PLAN_ACK_HOLD_OR_REVISE_RE.search(latest_text) is not None
+    no_changes_phrase = "no change" in latest_text or "no changes" in latest_text
+    if has_revision_or_hold_marker and not no_changes_phrase:
+        return False
+
+    if _PLAN_ACK_STRONG_POSITIVE_RE.search(latest_text):
+        return True
+    if _PLAN_ACK_GO_AHEAD_RE.search(latest_text):
+        return True
+    if _PLAN_ACK_LENIENT_POSITIVE_RE.search(latest_text):
+        return True
+    return any(phrase in latest_text for phrase in _PLAN_ACK_POSITIVE_PHRASES)
+
+
+def _is_plan_acknowledgement_turn(state: ResearchState, messages: list[Any]) -> bool:
+    return _is_plan_review_turn(state) and _is_plan_acknowledgement_message(messages)
 
 
 async def _handle_plan_acknowledgement(
@@ -286,7 +325,7 @@ async def scope_intake(
 ) -> Command[Literal["research_supervisor", "__end__"]]:
     """Handle clarification and brief synthesis before handing off to the supervisor."""
     messages = _state_messages(state)
-    if _is_plan_acknowledgement_turn(state):
+    if _is_plan_acknowledgement_turn(state, messages):
         return await _handle_plan_acknowledgement(messages, config)
     if not _should_run_clarification_pass(state, messages):
         return await _handle_direct_proceed(messages, config)

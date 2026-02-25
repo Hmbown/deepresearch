@@ -427,15 +427,6 @@ def validate_search_provider_configuration() -> str:
     return "Search provider ready (`SEARCH_PROVIDER=tavily`)."
 
 
-def get_model_string(role: ModelRole = "orchestrator") -> str:
-    """Return the raw provider:model string (e.g. ``"openai:gpt-5.2"``).
-
-    Callers that need a pre-configured ChatModel with Responses API flags
-    should use ``get_llm()`` instead.
-    """
-    return _resolve_model_for_role(role)
-
-
 def get_llm(role: ModelRole = "orchestrator", *, prefer_compact_context: bool = False):
     """Return a ChatModel for 'orchestrator' or 'subagent' role.
 

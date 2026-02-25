@@ -12,7 +12,13 @@ from collections.abc import Mapping
 
 from dotenv import load_dotenv
 
-from .config import SearchProviderConfigError, validate_search_provider_configuration
+from .config import (
+    DEFAULT_ORCHESTRATOR_MODEL,
+    DEFAULT_SUBAGENT_MODEL,
+    SearchProviderConfigError,
+    get_search_provider,
+    validate_search_provider_configuration,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _PROJECT_DOTENV = _PROJECT_ROOT / ".env"
@@ -182,10 +188,35 @@ def _discover_dotenv_path_from_cwd() -> Path | None:
     return None
 
 
+def _model_requires_openai_key(model: str) -> bool:
+    return str(model).strip().lower().startswith("openai:")
+
+
+def _required_runtime_env_vars() -> set[str]:
+    required: set[str] = set()
+    orchestrator_model = str(os.environ.get("ORCHESTRATOR_MODEL", DEFAULT_ORCHESTRATOR_MODEL)).strip()
+    subagent_model = str(os.environ.get("SUBAGENT_MODEL", DEFAULT_SUBAGENT_MODEL)).strip()
+    if _model_requires_openai_key(orchestrator_model) or _model_requires_openai_key(subagent_model):
+        required.add("OPENAI_API_KEY")
+
+    try:
+        search_provider = get_search_provider()
+    except SearchProviderConfigError:
+        search_provider = None
+
+    if search_provider == "openai":
+        required.add("OPENAI_API_KEY")
+    elif search_provider == "exa":
+        required.add("EXA_API_KEY")
+    elif search_provider == "tavily":
+        required.add("TAVILY_API_KEY")
+    return required
+
+
 def missing_runtime_env_vars() -> list[str]:
     """Return required runtime env vars that are currently unset."""
-    required = ("OPENAI_API_KEY",)
-    return [name for name in required if not os.environ.get(name)]
+    required = _required_runtime_env_vars()
+    return sorted(name for name in required if not str(os.environ.get(name, "")).strip())
 
 
 def ensure_runtime_env_ready() -> None:

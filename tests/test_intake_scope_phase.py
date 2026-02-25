@@ -178,6 +178,81 @@ def test_scope_intake_proceeds_after_plan_checkpoint_confirmation(monkeypatch):
     assert "ResearchBrief" in schemas_called
 
 
+def test_scope_intake_proceeds_after_plan_checkpoint_lenient_acknowledgement(monkeypatch):
+    graph = _load_graph_module()
+    intake = importlib.import_module("deepresearch.intake")
+    llm = FakeLLM(
+        structured_responses={
+            "ResearchBrief": [
+                SimpleNamespace(research_brief="Updated brief after user confirms the plan."),
+            ],
+        }
+    )
+    monkeypatch.setattr(intake, "get_llm", lambda role: llm)
+
+    command = asyncio.run(
+        graph.scope_intake(
+            {
+                "messages": [
+                    HumanMessage(content="Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?"),
+                    AIMessage(content='If this plan looks right, reply "start".'),
+                    HumanMessage(content="ok, proceed"),
+                ],
+                "awaiting_clarification": True,
+                "intake_decision": "clarify",
+                "research_brief": "Existing scoped brief",
+            }
+        )
+    )
+
+    assert command.goto == "research_supervisor"
+    assert command.update["intake_decision"] == "proceed"
+    assert command.update["awaiting_clarification"] is False
+    assert command.update["research_brief"] == "Updated brief after user confirms the plan."
+    assert [schema for schema, _ in llm.structured_calls] == ["ResearchBrief"]
+
+
+def test_scope_intake_does_not_start_research_when_plan_is_not_acknowledged(monkeypatch):
+    graph = _load_graph_module()
+    intake = importlib.import_module("deepresearch.intake")
+    llm = FakeLLM(
+        structured_responses={
+            "ClarifyWithUser": [
+                SimpleNamespace(
+                    need_clarification=False,
+                    question="",
+                    verification="Understood, I can proceed once confirmed.",
+                )
+            ],
+            "ResearchBrief": [SimpleNamespace(research_brief="Revised brief after user requested changes.")],
+        }
+    )
+    monkeypatch.setattr(intake, "get_llm", lambda role: llm)
+
+    command = asyncio.run(
+        graph.scope_intake(
+            {
+                "messages": [
+                    HumanMessage(content="Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?"),
+                    AIMessage(content='If this plan looks right, reply "start".'),
+                    HumanMessage(content="wait - adjust it to just large-cap issuers."),
+                ],
+                "awaiting_clarification": True,
+                "intake_decision": "clarify",
+                "research_brief": "Existing scoped brief",
+            }
+        )
+    )
+
+    assert command.goto == "__end__"
+    assert command.update["intake_decision"] == "clarify"
+    assert command.update["awaiting_clarification"] is True
+    assert "reply \"start\"" in command.update["messages"][0].content.lower()
+    schemas_called = [schema for schema, _ in llm.structured_calls]
+    assert "ClarifyWithUser" in schemas_called
+    assert "ResearchBrief" in schemas_called
+
+
 def test_scope_intake_fast_path_requires_clarify_state(monkeypatch):
     """Avoid fast-path regression when stale state sets `awaiting_clarification`.
 
