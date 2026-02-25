@@ -1,45 +1,46 @@
 # Deep Research
 
-LangGraph multi-agent system that clarifies scope, runs focused web research in parallel, and synthesizes a cited report.
+A LangGraph multi-agent system that takes a research question, clarifies it if needed, fans out parallel web researchers, and pulls it all together into a cited report.
 
-![Architecture](docs/architecture.png)
+<p align="center">
+  <img src="docs/architecture.svg" alt="Architecture" width="100%"/>
+</p>
 
-**Pipeline:** `scope_intake` (clarify & brief) → `research_supervisor` (parallel researcher dispatch via Send) → `final_report_generation` (synthesis with citations)
-
----
-
-## Quick Start
+## Getting started
 
 ```bash
 git clone https://github.com/Hmbown/deepresearch.git
 cd deepresearch
 pip install -e .
-cp .env.example .env   # set OPENAI_API_KEY at minimum
+cp .env.example .env   # add your OPENAI_API_KEY here
 deepresearch "your research question"
 ```
 
-## Prerequisites
+You'll need **Python 3.11+** and an **OpenAI API key**. A **Tavily API key** is optional but recommended for web search (Exa works too).
 
-| Requirement | Notes |
-|---|---|
-| Python 3.11+ | |
-| `OPENAI_API_KEY` | Required |
-| `TAVILY_API_KEY` | Optional — default search provider (Exa also supported) |
+## How it works
+
+The pipeline has three stages:
+
+1. **scope_intake** — figures out what you're actually asking. If the question is vague, it asks for clarification before doing any research.
+2. **research_supervisor** — breaks the question into parallel research tracks, dispatches researcher agents via LangGraph `Send`, waits at a barrier, then decides whether to iterate or move on.
+3. **final_report** — takes all the collected evidence and notes and synthesizes a report with citations.
 
 ## Configuration
 
+Copy the example env file and fill in your keys:
+
 ```bash
 cp .env.example .env
-# Edit .env — set at minimum OPENAI_API_KEY
 ```
 
-Run preflight to verify everything is wired up:
+Check that everything works:
 
 ```bash
 deepresearch --preflight
 ```
 
-Pass a LangSmith project name to also verify tracing auth:
+If you have LangSmith set up, you can verify tracing too:
 
 ```bash
 deepresearch --preflight my-langsmith-project
@@ -53,53 +54,52 @@ deepresearch --preflight my-langsmith-project
 deepresearch "your research question"
 ```
 
-### No-search fallback (smoke test)
+### Without web search
 
-Validate the full pipeline without web search:
+If you don't have search API credits or just want to test the pipeline:
 
 ```bash
-SEARCH_PROVIDER=none deepresearch "summarize the key differences between Python 3.11 and 3.12"
+SEARCH_PROVIDER=none deepresearch "key differences between Python 3.11 and 3.12"
 ```
 
 ### LangGraph Studio
 
-Start the local dev server:
+Spin up the dev server and open it in Studio:
 
 ```bash
 uvx --refresh --from "langgraph-cli[inmem]" --with-editable . --python 3.11 \
   langgraph dev --host 127.0.0.1 --port 2024 --no-browser --allow-blocking
 ```
 
-Then open Studio at: `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
+Then go to: `https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
 
 <details>
-<summary>Graph in LangGraph Studio</summary>
+<summary>What it looks like in Studio</summary>
 
-![LangGraph Studio Graph](docs/langgraph-graph.png)
+![LangGraph Studio](docs/langgraph-graph.png)
 
 </details>
 
-## Architecture
+## Project structure
 
-| Module | Lines | Role |
-|---|---|---|
-| `graph.py` | 41 | Pipeline assembly — wires intake → supervisor → report |
-| `state.py` | 550 | Shared state models, Pydantic schemas, text normalization |
-| `intake.py` | 293 | Scope clarification with Command routing |
-| `supervisor_subgraph.py` | 709 | Supervisor loop with Send-based parallel fan-out |
-| `researcher_subgraph.py` | 147 | Researcher agent with search/fetch/think tools |
-| `report.py` | 331 | Final synthesis with retry logic and source transparency |
-| `nodes.py` | 378 | Research tools — search, fetch (SSRF-protected), think |
-| `prompts.py` | 209 | All prompt templates |
-| `config.py` | 243 | Model/search provider configuration |
-| `env.py` | 306 | Environment bootstrap and preflight checks |
-| `cli.py` | 1063 | CLI with streaming ProgressDisplay |
-| `runtime_utils.py` | 86 | Runnable invocation helpers |
-| `message_utils.py` | 31 | Message content extraction |
-| `evals/evaluators.py` | 318 | LLM-as-judge evaluation (answer + process quality) |
-| `evals/callback.py` | 129 | Online eval callback handler |
+| Module | What it does |
+|---|---|
+| `graph.py` | Wires the three pipeline stages together |
+| `state.py` | Shared state, Pydantic schemas, helpers |
+| `intake.py` | Clarification + brief generation with Command routing |
+| `supervisor_subgraph.py` | Parallel research dispatch and iteration loop |
+| `researcher_subgraph.py` | Individual researcher agent with search/fetch/think tools |
+| `report.py` | Report synthesis with retries and source citations |
+| `nodes.py` | Tool implementations — search, fetch (SSRF-protected), think |
+| `prompts.py` | All the prompt templates |
+| `config.py` | Model and search provider config |
+| `env.py` | Env bootstrap and preflight checks |
+| `cli.py` | CLI with streaming progress display |
+| `evals/` | LLM-as-judge evaluation framework |
 
-## LangSmith Tracing
+## LangSmith tracing
+
+Add these to your `.env`:
 
 ```
 LANGCHAIN_TRACING_V2=true
@@ -109,10 +109,10 @@ LANGCHAIN_PROJECT=deepresearch-local
 
 ## Troubleshooting
 
-| Problem | Fix |
+| Issue | What to do |
 |---|---|
-| `deepagents` not found | `pip install -e .` |
-| Search credit errors (Exa `402`, Tavily quota) | `SEARCH_PROVIDER=none` in `.env` |
-| LangSmith shows "No data" | Check billing/quota limits on free tier |
-| OpenAI Responses API errors | Check `OPENAI_USE_RESPONSES_API` in `.env.example` |
-| `127.0.0.1:2024` confusion | That's the LangGraph local API, not LangSmith. Don't set `LANGCHAIN_ENDPOINT` to localhost. |
+| `deepagents` not found | Run `pip install -e .` again |
+| Search credit errors | Set `SEARCH_PROVIDER=none` in `.env` |
+| LangSmith shows no data | Check your billing/quota on the free tier |
+| OpenAI Responses API issues | Check `OPENAI_USE_RESPONSES_API` in `.env.example` |
+| Confused about `127.0.0.1:2024` | That's the LangGraph local API, not LangSmith. Don't set `LANGCHAIN_ENDPOINT` to localhost. |

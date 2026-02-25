@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 395" width="920" height="395">
+    <style>
+        text { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    </style>
+
+    <!-- Background -->
+    <rect width="920" height="395" rx="12" fill="#0F172A"/>
+
+    <defs>
+        <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#1D4ED8;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#10B981;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#A78BFA;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#7C3AED;stop-opacity:1" />
+        </linearGradient>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+            <polygon points="0 0, 10 3, 0 6" fill="#F59E0B"/>
+        </marker>
+        <marker id="arrow-sm" markerWidth="7" markerHeight="7" refX="6" refY="2.5" orient="auto">
+            <polygon points="0 0, 7 2.5, 0 5" fill="#F59E0B" opacity="0.7"/>
+        </marker>
+    </defs>
+
+    <!-- User Query -->
+    <rect x="15" y="130" width="90" height="60" rx="8" fill="url(#blueGrad)" stroke="#1F2937" stroke-width="2"/>
+    <text x="60" y="165" text-anchor="middle" fill="white" font-size="12" font-weight="500">User Query</text>
+
+    <!-- Arrow: query to intake -->
+    <path d="M 105 160 L 135 160" stroke="#F59E0B" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- scope_intake -->
+    <rect x="135" y="130" width="110" height="60" rx="8" fill="url(#blueGrad)" stroke="#1F2937" stroke-width="2"/>
+    <text x="190" y="157" text-anchor="middle" fill="white" font-size="12" font-weight="600">scope_intake</text>
+    <text x="190" y="173" text-anchor="middle" fill="rgba(255,255,255,0.75)" font-size="10">Clarify &amp; Brief</text>
+
+    <!-- Clarification loop -->
+    <path d="M 160 190 C 160 230, 80 230, 80 190 C 80 170, 80 165, 60 165"
+          stroke="#F59E0B" stroke-width="1.5" fill="none" stroke-dasharray="5,4" opacity="0.65" marker-end="url(#arrow-sm)"/>
+    <text x="120" y="245" text-anchor="middle" fill="#94A3B8" font-size="9" font-style="italic">clarify with user</text>
+
+    <!-- Arrow: intake to supervisor -->
+    <path d="M 245 160 L 280 160" stroke="#F59E0B" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- Supervisor subgraph boundary -->
+    <rect x="280" y="60" width="305" height="215" rx="10" fill="none" stroke="url(#greenGrad)" stroke-width="2.5" stroke-dasharray="6,4"/>
+    <text x="432" y="80" text-anchor="middle" fill="#10B981" font-size="12" font-weight="700">research_supervisor (subgraph)</text>
+
+    <!-- Send -->
+    <rect x="295" y="95" width="65" height="32" rx="6" fill="url(#greenGrad)" stroke="#1F2937" stroke-width="1"/>
+    <text x="327" y="116" text-anchor="middle" fill="white" font-size="10" font-weight="600">Send</text>
+
+    <!-- Fan-out arrows -->
+    <path d="M 315 127 L 330 143" stroke="#F59E0B" stroke-width="1.5" fill="none" opacity="0.6" marker-end="url(#arrow-sm)"/>
+    <path d="M 335 127 L 400 143" stroke="#F59E0B" stroke-width="1.5" fill="none" opacity="0.6" marker-end="url(#arrow-sm)"/>
+    <path d="M 350 127 L 470 143" stroke="#F59E0B" stroke-width="1.5" fill="none" opacity="0.6" marker-end="url(#arrow-sm)"/>
+
+    <!-- Researcher 1 -->
+    <rect x="305" y="143" width="55" height="42" rx="6" fill="url(#purpleGrad)" stroke="#1F2937" stroke-width="1"/>
+    <text x="332" y="168" text-anchor="middle" fill="white" font-size="9" font-weight="600">Researcher</text>
+
+    <!-- Researcher 2 -->
+    <rect x="375" y="143" width="55" height="42" rx="6" fill="url(#purpleGrad)" stroke="#1F2937" stroke-width="1"/>
+    <text x="402" y="168" text-anchor="middle" fill="white" font-size="9" font-weight="600">Researcher</text>
+
+    <!-- Researcher 3 -->
+    <rect x="445" y="143" width="55" height="42" rx="6" fill="url(#purpleGrad)" stroke="#1F2937" stroke-width="1"/>
+    <text x="472" y="168" text-anchor="middle" fill="white" font-size="9" font-weight="600">Researcher</text>
+
+    <!-- Convergence arrows -->
+    <path d="M 332 185 L 390 210" stroke="#F59E0B" stroke-width="1.5" fill="none" opacity="0.6" marker-end="url(#arrow-sm)"/>
+    <path d="M 402 185 L 408 210" stroke="#F59E0B" stroke-width="1.5" fill="none" opacity="0.6" marker-end="url(#arrow-sm)"/>
+    <path d="M 472 185 L 435 210" stroke="#F59E0B" stroke-width="1.5" fill="none" opacity="0.6" marker-end="url(#arrow-sm)"/>
+
+    <!-- research_barrier -->
+    <rect x="370" y="210" width="90" height="30" rx="6" fill="url(#greenGrad)" stroke="#1F2937" stroke-width="1"/>
+    <text x="415" y="229" text-anchor="middle" fill="white" font-size="9" font-weight="500">research_barrier</text>
+
+    <!-- Loop arrow -->
+    <path d="M 460 225 C 555 225, 565 160, 565 115 C 565 85, 430 82, 363 95"
+          stroke="#F59E0B" stroke-width="1.5" fill="none" stroke-dasharray="4,3" opacity="0.65" marker-end="url(#arrow-sm)"/>
+    <text x="572" y="162" font-size="8" fill="#D97706" font-style="italic">iterate</text>
+
+    <!-- Arrow: supervisor to final_report -->
+    <path d="M 585 160 L 625 160" stroke="#F59E0B" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- final_report -->
+    <rect x="625" y="130" width="120" height="60" rx="8" fill="url(#blueGrad)" stroke="#1F2937" stroke-width="2"/>
+    <text x="685" y="157" text-anchor="middle" fill="white" font-size="12" font-weight="600">final_report</text>
+    <text x="685" y="173" text-anchor="middle" fill="rgba(255,255,255,0.75)" font-size="10">Synthesis</text>
+
+    <!-- Arrow: final_report to Report -->
+    <path d="M 745 160 L 785 160" stroke="#F59E0B" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- Report -->
+    <rect x="785" y="130" width="90" height="60" rx="8" fill="url(#blueGrad)" stroke="#1F2937" stroke-width="2"/>
+    <text x="830" y="165" text-anchor="middle" fill="white" font-size="12" font-weight="500">Report</text>
+
+    <!-- Legend -->
+    <text x="30" y="330" font-size="11" fill="#6B7280" font-weight="600">Legend:</text>
+
+    <rect x="30" y="345" width="14" height="14" rx="3" fill="url(#blueGrad)"/>
+    <text x="50" y="357" font-size="10" fill="#6B7280">Main Graph Nodes</text>
+
+    <rect x="210" y="345" width="14" height="14" rx="3" fill="url(#greenGrad)"/>
+    <text x="230" y="357" font-size="10" fill="#6B7280">Supervisor Subgraph</text>
+
+    <rect x="415" y="345" width="14" height="14" rx="3" fill="url(#purpleGrad)"/>
+    <text x="435" y="357" font-size="10" fill="#6B7280">Researcher Instances (parallel)</text>
+
+    <line x1="680" y1="352" x2="700" y2="352" stroke="#F59E0B" stroke-width="2.5"/>
+    <polygon points="700 349, 708 352, 700 355" fill="#F59E0B"/>
+    <text x="715" y="357" font-size="10" fill="#6B7280">Routing Edges</text>
+
+    <line x1="680" y1="372" x2="700" y2="372" stroke="#F59E0B" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <polygon points="700 369, 706 372, 700 375" fill="#F59E0B" opacity="0.7"/>
+    <text x="715" y="377" font-size="10" fill="#6B7280">Conditional / Loop</text>
+</svg>
