@@ -14,3 +14,5 @@ firebase-debug.log
 handoff_*.log
 .benchmarks/
 .deepeval/
+CLAUDE.md
+AGENTS.md
