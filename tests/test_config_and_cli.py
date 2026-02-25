@@ -387,6 +387,16 @@ def test_cli_result_section_title_defaults_to_research_report_with_stats():
     )
 
 
+def test_cli_result_section_title_counts_only_fetched_sources():
+    result = {
+        "evidence_ledger": [
+            {"source_urls": ["https://example.com/fetched"], "source_type": "fetched"},
+            {"source_urls": ["https://example.org/cited"], "source_type": "model_cited"},
+        ]
+    }
+    assert cli._result_section_title(result) == "RESEARCH REPORT (1 sources | 1 domains)"
+
+
 def test_cli_print_results_prints_no_response_message_when_ai_missing(capsys):
     cli.print_results({"messages": [SimpleNamespace(type="human", content="query")]})
     output = capsys.readouterr().out

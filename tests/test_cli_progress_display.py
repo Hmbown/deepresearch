@@ -97,8 +97,8 @@ def test_progress_display_wave_summary_shows_source_counts():
         _supervisor_progress_event(
             {
                 "supervisor_iteration": 2,
-                "requested_research_units": 0,
-                "dispatched_research_units": 0,
+                "requested_research_units": 1,
+                "dispatched_research_units": 1,
                 "skipped_research_units": 0,
                 "remaining_iterations": 10,
                 "max_concurrent_research_units": 6,
@@ -114,6 +114,34 @@ def test_progress_display_wave_summary_shows_source_counts():
     rendered = stream.getvalue()
     assert "5 sources" in rendered
     assert "3 domains" in rendered
+
+
+def test_progress_display_does_not_render_empty_wave_summary_when_no_dispatch():
+    stream = io.StringIO()
+    display = cli.ProgressDisplay(stream=stream)
+
+    display.handle_event(_supervisor_prepare_start_event())
+    display.handle_event(
+        _supervisor_progress_event(
+            {
+                "supervisor_iteration": 2,
+                "requested_research_units": 0,
+                "dispatched_research_units": 0,
+                "skipped_research_units": 0,
+                "remaining_iterations": 10,
+                "max_concurrent_research_units": 6,
+                "max_researcher_iterations": 16,
+                "evidence_record_count": 5,
+                "source_domain_count": 3,
+                "source_domains": ["example.com", "example.org", "example.net"],
+                "research_units": [],
+            }
+        )
+    )
+
+    rendered = stream.getvalue()
+    assert "evaluating quality gate" in rendered
+    assert "Wave 1 complete" not in rendered
 
 
 def test_progress_display_wave_dispatch_uses_runtime_progress_payload():
@@ -238,8 +266,8 @@ def test_progress_display_uses_runtime_progress_not_tool_messages():
         _supervisor_progress_event(
             {
                 "supervisor_iteration": 3,
-                "requested_research_units": 0,
-                "dispatched_research_units": 0,
+                "requested_research_units": 1,
+                "dispatched_research_units": 1,
                 "skipped_research_units": 0,
                 "remaining_iterations": 7,
                 "max_concurrent_research_units": 6,

@@ -270,12 +270,19 @@ class ResearchComplete(BaseModel):
     pass
 
 
+EvidenceSourceType = Literal["fetched", "model_cited"]
+
+
 class EvidenceRecord(BaseModel):
     """Structured evidence item extracted from researcher output."""
 
     source_urls: list[str] = Field(
         default_factory=list,
         description="Source URLs extracted from researcher output.",
+    )
+    source_type: EvidenceSourceType = Field(
+        default="fetched",
+        description="Where this URL came from: fetched/search tool output or model-cited prose.",
     )
 
 
@@ -475,6 +482,17 @@ def normalize_evidence_ledger(value: Any) -> list[EvidenceRecord]:
                 continue
             continue
     return normalized
+
+
+def filter_evidence_ledger(
+    evidence_ledger: list[EvidenceRecord],
+    *,
+    source_type: EvidenceSourceType | None = None,
+) -> list[EvidenceRecord]:
+    """Filter evidence records by source provenance when requested."""
+    if source_type is None:
+        return list(evidence_ledger)
+    return [record for record in evidence_ledger if record.source_type == source_type]
 
 
 def join_note_list(values: Any) -> str | None:

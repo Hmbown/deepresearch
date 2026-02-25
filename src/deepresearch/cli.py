@@ -22,7 +22,7 @@ from .config import online_evals_enabled
 from .env import ensure_runtime_env_ready, project_dotenv_path, runtime_preflight, update_project_dotenv
 from .message_utils import extract_text_content as _extract_text_content
 from .researcher_subgraph import extract_research_from_messages
-from .state import normalize_evidence_ledger
+from .state import filter_evidence_ledger, normalize_evidence_ledger
 
 _TOOL_EVENT_TYPES = {
     "on_tool_start",
@@ -74,8 +74,9 @@ def _final_assistant_text(result: dict[str, Any]) -> str:
 
 def _result_evidence_stats(result: dict[str, Any]) -> tuple[int, int]:
     evidence = normalize_evidence_ledger(result.get("evidence_ledger"))
-    domains = _collect_domains(evidence)
-    return len(evidence), len(domains)
+    fetched_evidence = filter_evidence_ledger(evidence, source_type="fetched")
+    domains = _collect_domains(fetched_evidence)
+    return len(fetched_evidence), len(domains)
 
 
 def _result_section_title(result: dict[str, Any], elapsed_seconds: float | None = None) -> str:
@@ -191,39 +192,18 @@ def _extract_supervisor_progress_payload(event_name: str, data: Mapping[str, Any
     return dict(data)
 
 
-def _collect_evidence_from_research_output(output: Mapping[str, Any] | None) -> tuple[list[Any], list[str]]:
+def _collect_evidence_from_research_output(output: Mapping[str, Any] | None) -> tuple[list[Any], int]:
     if not isinstance(output, Mapping):
-        return [], []
+        return [], 0
 
     evidence_records = normalize_evidence_ledger(output.get("evidence_ledger"))
     if not evidence_records and isinstance(output.get("messages"), list):
         _, _, extracted_evidence = extract_research_from_messages({"messages": list(output["messages"])})
         evidence_records = extracted_evidence
 
-    source_urls: list[str] = []
-    for record in evidence_records:
-        for source_url in getattr(record, "source_urls", []):
-            url = str(source_url).strip()
-            if url and url not in source_urls:
-                source_urls.append(url)
-
-    messages = output.get("messages")
-    if isinstance(messages, list):
-        for msg in messages:
-            # Only parse URLs from AI-authored content. Tool outputs (especially search results)
-            # often include many "URL:" lines that are not actually cited evidence and will
-            # wildly inflate the domain counts in the CLI progress display.
-            if getattr(msg, "type", "") != "ai":
-                continue
-            content = _extract_text_content(getattr(msg, "content", "")).strip()
-            if not content:
-                continue
-            for match in _SEARCH_URL_RE.finditer(content):
-                source_url = match.group(1).strip()
-                if source_url and source_url not in source_urls:
-                    source_urls.append(source_url)
-
-    return evidence_records, source_urls
+    fetched_records = filter_evidence_ledger(evidence_records, source_type="fetched")
+    model_cited_records = filter_evidence_ledger(evidence_records, source_type="model_cited")
+    return fetched_records, len(model_cited_records)
 
 
 def _collect_domains(records: list[Any]) -> set[str]:
@@ -279,6 +259,7 @@ class ProgressDisplay:
         self._evidence_keys: set[str] = set()
         self._evidence_record_count = 0
         self._evidence_domains: set[str] = set()
+        self._model_cited_record_count = 0
 
         self._current_phase: str | None = None
         self._phase_started_at: dict[str, float] = {}
@@ -364,7 +345,7 @@ class ProgressDisplay:
         base_depth = self._depth({"checkpoint_ns": checkpoint_ns or ""} if checkpoint_ns is not None else None)
         return max(0, base_depth + 1)
 
-    def _add_evidence(self, raw_records: Any, raw_urls: list[str] | None = None) -> None:
+    def _add_evidence(self, raw_records: Any) -> None:
         records = normalize_evidence_ledger(raw_records)
         for record in records:
             source_urls = [str(url).strip() for url in getattr(record, "source_urls", []) if str(url).strip()]
@@ -374,12 +355,6 @@ class ProgressDisplay:
             self._evidence_keys.add(key)
             self._evidence_record_count += 1
             self._evidence_domains.update(_collect_domains([record]))
-
-        if raw_urls:
-            for raw_url in raw_urls:
-                domain = urlparse(str(raw_url)).netloc.lower()
-                if domain:
-                    self._evidence_domains.add(domain)
 
     def _start_research_section(
         self,
@@ -415,20 +390,23 @@ class ProgressDisplay:
         if context is None:
             return
 
-        evidence_records, source_urls = _collect_evidence_from_research_output(output)
-        self._add_evidence(evidence_records, source_urls)
+        evidence_records, model_cited_count = _collect_evidence_from_research_output(output)
+        self._add_evidence(evidence_records)
+        self._model_cited_record_count += max(0, model_cited_count)
         domains = _collect_domains(evidence_records)
-        if not domains and source_urls:
-            for source_url in source_urls:
-                domain = urlparse(str(source_url)).netloc.lower()
-                if domain:
-                    domains.add(domain)
         elapsed = _format_duration(time.monotonic() - context.started_at)
-        self._emit(
-            (
+        summary = (
+            f'researcher[{context.index}] "{_truncate(context.topic, 72)}" - '
+            f"{len(evidence_records)} sources, {len(domains)} domains ({elapsed})"
+        )
+        if model_cited_count > 0:
+            summary = (
                 f'researcher[{context.index}] "{_truncate(context.topic, 72)}" - '
-                f"{len(evidence_records)} sources, {len(domains)} domains ({elapsed})"
-            ),
+                f"{len(evidence_records)} sources, {len(domains)} domains, "
+                f"{model_cited_count} model-cited URLs ({elapsed})"
+            )
+        self._emit(
+            summary,
             depth=1,
         )
         self._emit(
@@ -453,6 +431,10 @@ class ProgressDisplay:
             normalized_domains = {str(domain).strip().lower() for domain in source_domains if str(domain).strip()}
             self._evidence_domains = normalized_domains
         self._evidence_record_count = evidence_count
+        self._model_cited_record_count = self._coerce_non_negative_int(
+            progress.get("model_cited_record_count"),
+            self._model_cited_record_count,
+        )
 
     def _handle_research_unit_summary(self, summary: Mapping[str, Any], depth: int) -> None:
         status = str(summary.get("status", "")).strip().lower()
@@ -518,12 +500,14 @@ class ProgressDisplay:
         dispatch_count = self._coerce_non_negative_int(progress.get("dispatched_research_units"), 0)
         skipped_count = self._coerce_non_negative_int(progress.get("skipped_research_units"), 0)
         supervisor_iteration = self._coerce_non_negative_int(progress.get("supervisor_iteration"), 1)
-        wave_index = self._active_wave
-        if wave_index == 0:
-            self._research_wave += 1
-            wave_index = self._research_wave
 
         if dispatch_count > 0:
+            wave_index = self._active_wave
+            if wave_index == 0:
+                self._research_wave += 1
+                wave_index = self._research_wave
+                self._active_wave = wave_index
+                self._wave_started_at[wave_index] = time.monotonic()
             message = (
                 f"Wave {wave_index}: Supervisor iteration {supervisor_iteration} - "
                 f"dispatching {dispatch_count} researcher{'s' if dispatch_count != 1 else ''} in parallel"
@@ -542,14 +526,16 @@ class ProgressDisplay:
                 if isinstance(summary, Mapping):
                     self._handle_research_unit_summary(summary, depth)
 
-        wave_elapsed = _format_duration(time.monotonic() - self._wave_started_at.get(wave_index, self._start))
-        self._emit(
-            (
-                f"Wave {wave_index} complete in {wave_elapsed}: "
-                f"{self._evidence_record_count} sources, {len(self._evidence_domains)} domains"
-            ),
-            depth=0,
-        )
+        if dispatch_count > 0:
+            wave_index = self._active_wave
+            wave_elapsed = _format_duration(time.monotonic() - self._wave_started_at.get(wave_index, self._start))
+            self._emit(
+                (
+                    f"Wave {wave_index} complete in {wave_elapsed}: "
+                    f"{self._evidence_record_count} sources, {len(self._evidence_domains)} domains"
+                ),
+                depth=0,
+            )
         self._active_wave = 0
 
     def _handle_chain_start(
@@ -567,9 +553,6 @@ class ProgressDisplay:
             return
 
         if event_name == "supervisor_prepare":
-            self._research_wave += 1
-            self._active_wave = self._research_wave
-            self._wave_started_at[self._active_wave] = time.monotonic()
             return
 
         if event_name == "final_report_generation":

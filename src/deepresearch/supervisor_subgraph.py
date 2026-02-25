@@ -30,6 +30,7 @@ from .state import (
     EvidenceRecord,
     ResearchComplete,
     SupervisorState,
+    filter_evidence_ledger,
     join_note_list,
     latest_ai_message,
     normalize_evidence_ledger,
@@ -110,6 +111,28 @@ def _extract_source_domains(evidence_ledger: list[EvidenceRecord]) -> list[str]:
             if domain:
                 domains.add(domain)
     return sorted(domains)
+
+
+def _dedupe_evidence_records(evidence_ledger: list[EvidenceRecord]) -> list[EvidenceRecord]:
+    """URL-level dedupe that prefers fetched provenance over model-cited."""
+    by_url: dict[str, EvidenceRecord] = {}
+    ordered_urls: list[str] = []
+
+    for record in evidence_ledger:
+        source_type = "fetched" if record.source_type == "fetched" else "model_cited"
+        for raw_url in record.source_urls:
+            url = str(raw_url).strip()
+            if not url:
+                continue
+            existing = by_url.get(url)
+            if existing is None:
+                by_url[url] = EvidenceRecord(source_urls=[url], source_type=source_type)
+                ordered_urls.append(url)
+                continue
+            if existing.source_type != "fetched" and source_type == "fetched":
+                by_url[url] = EvidenceRecord(source_urls=[url], source_type="fetched")
+
+    return [by_url[url] for url in ordered_urls]
 
 
 def _sanitize_research_unit_failure(exc: Exception) -> str:
@@ -468,8 +491,10 @@ async def run_research_unit(state: dict[str, Any]) -> dict[str, Any]:
         result = {}
 
     compressed, raw, evidence = extract_research_from_messages(result)
+    fetched_evidence = filter_evidence_ledger(evidence, source_type="fetched")
+    model_cited_evidence = filter_evidence_ledger(evidence, source_type="model_cited")
     content = compressed or join_note_list(raw) or "[Research unit returned no notes]"
-    source_domains = _extract_source_domains(evidence)
+    source_domains = _extract_source_domains(fetched_evidence)
     status = "empty" if not compressed and not raw and not evidence else "completed"
     updates: dict[str, Any] = {
         "supervisor_messages": [
@@ -486,8 +511,9 @@ async def run_research_unit(state: dict[str, Any]) -> dict[str, Any]:
                 "call_id": call_id,
                 "topic": topic,
                 "status": status,
-                "evidence_record_count": len(evidence),
+                "evidence_record_count": len(fetched_evidence),
                 "source_domain_count": len(source_domains),
+                "model_cited_record_count": len(model_cited_evidence),
                 "duration_seconds": round(asyncio.get_running_loop().time() - started_at, 3),
             }
         ],
@@ -518,20 +544,11 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
         else []
     )
 
-    existing_evidence = normalize_evidence_ledger(state.get("evidence_ledger"))
-
-    # URL-level deduplication across researchers
-    seen_urls: set[str] = set()
-    deduped_evidence: list[EvidenceRecord] = []
-    for record in existing_evidence:
-        new_urls = [url for url in record.source_urls if url not in seen_urls]
-        if not new_urls and record.source_urls:
-            continue  # all URLs already seen — skip duplicate record
-        seen_urls.update(new_urls)
-        deduped_evidence.append(record)
-    existing_evidence = deduped_evidence
-
-    source_domains = _extract_source_domains(existing_evidence)
+    existing_evidence = _dedupe_evidence_records(normalize_evidence_ledger(state.get("evidence_ledger")))
+    fetched_evidence = filter_evidence_ledger(existing_evidence, source_type="fetched")
+    model_cited_evidence = filter_evidence_ledger(existing_evidence, source_type="model_cited")
+    source_domains = _extract_source_domains(fetched_evidence)
+    model_cited_domains = _extract_source_domains(model_cited_evidence)
 
     completed = bool(complete_calls)
     tool_messages: list[ToolMessage] = []
@@ -539,8 +556,10 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
         log_runtime_event(
             _logger,
             "supervisor_research_complete",
-            evidence_record_count=len(existing_evidence),
+            evidence_record_count=len(fetched_evidence),
             source_domain_count=len(source_domains),
+            model_cited_record_count=len(model_cited_evidence),
+            model_cited_domain_count=len(model_cited_domains),
         )
         for index, call in enumerate(complete_calls):
             tool_messages.append(
@@ -573,9 +592,12 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
         "remaining_iterations": remaining_iterations,
         "max_concurrent_research_units": get_max_concurrent_research_units(),
         "max_researcher_iterations": max_researcher_iterations,
-        "evidence_record_count": len(existing_evidence),
+        "evidence_record_count": len(fetched_evidence),
         "source_domain_count": len(source_domains),
         "source_domains": sorted(source_domains),
+        "model_cited_record_count": len(model_cited_evidence),
+        "model_cited_domain_count": len(model_cited_domains),
+        "model_cited_domains": sorted(model_cited_domains),
         "planned_research_units": [
             {
                 "call_id": str(call.get("id") or ""),

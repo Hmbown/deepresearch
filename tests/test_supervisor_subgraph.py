@@ -147,3 +147,41 @@ def test_research_barrier_routes_to_finalize_when_wave_is_complete():
     )
 
     assert command.goto == "supervisor_finalize"
+
+
+def test_supervisor_finalize_progress_counts_only_fetched_evidence(monkeypatch):
+    module = importlib.import_module("deepresearch.supervisor_subgraph")
+    captured_payload: dict[str, object] = {}
+
+    async def fake_dispatch(event_name, payload, config=None):
+        del config
+        captured_payload["event_name"] = event_name
+        captured_payload["payload"] = payload
+
+    monkeypatch.setattr(module, "adispatch_custom_event", fake_dispatch)
+    monkeypatch.setattr(module, "get_max_researcher_iterations", lambda: 6)
+
+    state = {
+        "pending_complete_calls": [{"id": "complete-1"}],
+        "pending_requested_research_units": 0,
+        "pending_dispatched_research_units": 0,
+        "pending_skipped_research_units": 0,
+        "pending_remaining_iterations": 4,
+        "pending_research_calls": [],
+        "research_unit_summaries": [],
+        "research_unit_summaries_consumed": 0,
+        "research_iterations": 2,
+        "evidence_ledger": [
+            {"source_urls": ["https://example.com/a"], "source_type": "model_cited"},
+            {"source_urls": ["https://example.com/a"], "source_type": "fetched"},
+            {"source_urls": ["https://example.org/b"], "source_type": "model_cited"},
+        ],
+    }
+
+    asyncio.run(module.supervisor_finalize(state))
+    payload = captured_payload["payload"]
+    assert captured_payload["event_name"] == "supervisor_progress"
+    assert payload["evidence_record_count"] == 1
+    assert payload["source_domains"] == ["example.com"]
+    assert payload["model_cited_record_count"] == 1
+    assert payload["model_cited_domains"] == ["example.org"]

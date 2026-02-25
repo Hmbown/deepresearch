@@ -41,6 +41,8 @@ def test_extract_research_from_messages_emits_typed_evidence_records():
     assert raw_notes
     assert evidence_ledger
     assert any(record.source_urls for record in evidence_ledger)
+    assert all(record.source_type in {"fetched", "model_cited"} for record in evidence_ledger)
+    assert any(record.source_type == "fetched" for record in evidence_ledger)
 
 
 def test_supervisor_finalize_always_accepts_research_complete(monkeypatch):

@@ -13,7 +13,7 @@ def _researcher_chain_start_event(topic: str) -> dict[str, object]:
     }
 
 
-def test_collect_evidence_from_research_output_uses_message_extraction():
+def test_collect_evidence_from_research_output_ignores_model_cited_urls_for_progress_counts():
     output = {
         "messages": [
             SimpleNamespace(
@@ -27,10 +27,9 @@ def test_collect_evidence_from_research_output_uses_message_extraction():
         ]
     }
 
-    evidence_records, source_urls = cli._collect_evidence_from_research_output(output)
-    assert len(evidence_records) >= 1
-    assert any("https://example.com/report" in record.source_urls for record in evidence_records)
-    assert "https://example.com/report" in source_urls
+    evidence_records, model_cited_count = cli._collect_evidence_from_research_output(output)
+    assert evidence_records == []
+    assert model_cited_count == 1
 
 
 def test_progress_display_finishes_only_for_top_level_langgraph_event():
@@ -120,6 +119,12 @@ def test_progress_display_research_summary_uses_extracted_evidence():
                 "output": {
                     "messages": [
                         SimpleNamespace(
+                            type="tool",
+                            name="search_web",
+                            tool_call_id="search-1",
+                            content="URL: https://navy.example/briefing",
+                        ),
+                        SimpleNamespace(
                             type="ai",
                             content=(
                                 "The latest fleet trials showed autonomous maritime drones extending mission "
@@ -137,3 +142,33 @@ def test_progress_display_research_summary_uses_extracted_evidence():
     rendered = stream.getvalue()
     assert "1 sources, 1 domains" in rendered
     assert "Total so far: 1 sources from 1 domains" in rendered
+
+
+def test_progress_display_research_summary_surfaces_model_cited_urls_separately():
+    stream = io.StringIO()
+    display = cli.ProgressDisplay(stream=stream)
+    display.handle_event(_researcher_chain_start_event("Autonomous maritime systems"))
+    display.handle_event(
+        {
+            "event": "on_chain_end",
+            "name": "deep-researcher",
+            "metadata": {"checkpoint_ns": "researcher|1"},
+            "data": {
+                "output": {
+                    "messages": [
+                        SimpleNamespace(
+                            type="ai",
+                            content=(
+                                "Autonomy note [1].\n\n"
+                                "Sources:\n"
+                                "[1] https://navy.example/briefing"
+                            ),
+                        )
+                    ]
+                }
+            },
+        }
+    )
+
+    rendered = stream.getvalue()
+    assert "0 sources, 0 domains, 1 model-cited URLs" in rendered
