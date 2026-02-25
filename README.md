@@ -20,7 +20,7 @@ You'll need **Python 3.11+** and an **OpenAI API key**. By default, search uses 
 
 ## Design walkthrough
 
-See [DESIGN.md](DESIGN.md) for a walkthrough of the thought process behind the architecture — what worked, what didn't, and what I'd do with more time.
+See [DESIGN.md](DESIGN.md) for a walkthrough of the thought process behind the architecture — what worked, what didn't, and why.
 
 ## How it works
 
