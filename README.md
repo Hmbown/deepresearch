@@ -18,6 +18,10 @@ deepresearch "your research question"
 
 You'll need **Python 3.11+** and an **OpenAI API key**. By default, search uses OpenAI's built-in `web_search` tool in the Responses API. Tavily/Exa are optional alternatives.
 
+## Design walkthrough
+
+See [DESIGN.md](DESIGN.md) for a walkthrough of the thought process behind the architecture — what worked, what didn't, and what I'd do with more time.
+
 ## How it works
 
 The pipeline has three stages:
