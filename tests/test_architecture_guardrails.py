@@ -43,7 +43,7 @@ def test_no_machine_specific_paths_in_source_and_docs():
         else:
             files.append(target)
     for path in files:
-        if path.is_dir():
+        if path.is_dir() or not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
         for token in forbidden_tokens:

@@ -27,12 +27,7 @@ def test_final_report_generation_success_path_preserves_source_markers(monkeypat
     model = _FakeReportModel(
         [
             AIMessage(
-                content=(
-                    "## Summary\n"
-                    "Primary finding with evidence [1].\n\n"
-                    "Sources:\n"
-                    "[1] https://example.com/source-a"
-                )
+                content=("## Summary\nPrimary finding with evidence [1].\n\nSources:\n[1] https://example.com/source-a")
             )
         ]
     )
@@ -146,16 +141,7 @@ def test_final_report_generation_filters_malformed_urls_from_sources(monkeypatch
 
 def test_final_report_generation_does_not_duplicate_existing_markdown_sources_heading(monkeypatch):
     model = _FakeReportModel(
-        [
-            AIMessage(
-                content=(
-                    "## Summary\n"
-                    "Findings with citation [1].\n\n"
-                    "## Sources\n"
-                    "[1] https://example.com/source-a"
-                )
-            )
-        ]
+        [AIMessage(content=("## Summary\nFindings with citation [1].\n\n## Sources\n[1] https://example.com/source-a"))]
     )
     monkeypatch.setattr(report, "get_llm", lambda role: model)
 

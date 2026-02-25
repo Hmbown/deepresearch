@@ -427,10 +427,13 @@ def test_cli_run_generates_thread_id_when_missing(monkeypatch):
 
 def test_cli_result_section_title_uses_clarification_label():
     assert cli._result_section_title({"intake_decision": "clarify"}) == "CLARIFICATION"
-    assert cli._result_section_title(
-        {"intake_decision": "clarify"},
-        elapsed_seconds=12.0,
-    ) == "CLARIFICATION (12s)"
+    assert (
+        cli._result_section_title(
+            {"intake_decision": "clarify"},
+            elapsed_seconds=12.0,
+        )
+        == "CLARIFICATION (12s)"
+    )
 
 
 def test_cli_result_section_title_uses_research_plan_label_for_plan_checkpoint():
@@ -440,7 +443,7 @@ def test_cli_result_section_title_uses_research_plan_label_for_plan_checkpoint()
             SimpleNamespace(
                 type="ai",
                 content=(
-                    'Before I start research, here is the plan.\n'
+                    "Before I start research, here is the plan.\n"
                     'If this plan looks right, reply "start" to launch research.'
                 ),
             )

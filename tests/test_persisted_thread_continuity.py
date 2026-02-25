@@ -281,10 +281,12 @@ def _try_import_sqlite_saver():
     """Try to import SqliteSaver; skip test if unavailable."""
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
+
         return SqliteSaver
     except ImportError:
         try:
             from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
             return AsyncSqliteSaver
         except ImportError:
             return None
@@ -337,15 +339,14 @@ def test_sqlite_checkpointer_clarify_then_proceed(monkeypatch, tmp_path):
     db_path = str(tmp_path / "test_checkpoint.db")
 
     import sqlite3
+
     conn = sqlite3.connect(db_path)
     try:
         checkpointer = SqliteSaver(conn)
         app = graph.build_app(checkpointer=checkpointer)
         cfg = _thread_config("thread-sqlite-test")
 
-        first = asyncio.run(
-            app.ainvoke({"messages": [HumanMessage(content="Research a broad topic.")]}, config=cfg)
-        )
+        first = asyncio.run(app.ainvoke({"messages": [HumanMessage(content="Research a broad topic.")]}, config=cfg))
         assert first["intake_decision"] == "clarify"
         assert first["awaiting_clarification"] is True
 

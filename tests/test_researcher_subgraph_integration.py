@@ -102,9 +102,7 @@ def test_researcher_deep_agent_loop_preserves_sources(monkeypatch):
         "https://example.com/source-a",
         "https://example.com/source-b",
     }
-    evidence_by_url = {
-        record.source_urls[0]: record.source_type for record in evidence_ledger if record.source_urls
-    }
+    evidence_by_url = {record.source_urls[0]: record.source_type for record in evidence_ledger if record.source_urls}
     assert evidence_by_url["https://example.com/source-a"] == "fetched"
     assert evidence_by_url["https://example.com/source-b"] == "model_cited"
     assert compressed is not None

@@ -426,6 +426,7 @@ def research_barrier(state: SupervisorState) -> Command[Literal["supervisor_fina
 
 async def run_research_unit(state: dict[str, Any]) -> dict[str, Any]:
     """Execute one ConductResearch call from Send fan-out."""
+
     def _missing_topic_result(call_id: str, duration_seconds: float) -> dict[str, Any]:
         return {
             "supervisor_messages": [
@@ -539,9 +540,7 @@ async def supervisor_finalize(state: SupervisorState, config: RunnableConfig = N
 
     complete_calls_raw = state.get("pending_complete_calls")
     complete_calls = (
-        [call for call in complete_calls_raw if isinstance(call, dict)]
-        if isinstance(complete_calls_raw, list)
-        else []
+        [call for call in complete_calls_raw if isinstance(call, dict)] if isinstance(complete_calls_raw, list) else []
     )
 
     existing_evidence = _dedupe_evidence_records(normalize_evidence_ledger(state.get("evidence_ledger")))

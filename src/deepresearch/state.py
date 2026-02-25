@@ -15,9 +15,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .message_utils import extract_text_content
 
-FALLBACK_CLARIFY_QUESTION = (
-    "Before I start, can you clarify the scope so I can research the right thing?"
-)
+FALLBACK_CLARIFY_QUESTION = "Before I start, can you clarify the scope so I can research the right thing?"
 FALLBACK_VERIFICATION = (
     "I have enough context to begin deep research now. I will break this into focused research "
     "tracks, verify with strong sources, and return a synthesized report with citations."
@@ -258,9 +256,7 @@ class ConductResearch(BaseModel):
     """Tool payload for delegating one focused research unit."""
 
     research_topic: str = Field(
-        description=(
-            "The focused topic for one research unit with enough context to execute independently."
-        ),
+        description=("The focused topic for one research unit with enough context to execute independently."),
     )
 
 
@@ -362,11 +358,7 @@ def normalize_topic_token(token: str) -> str:
 
 def tokenize_for_intent(text: str) -> set[str]:
     """Tokenize normalized user text for lightweight intent comparison."""
-    return {
-        token
-        for token in (normalize_topic_token(raw) for raw in re.findall(r"[A-Za-z0-9']+", text))
-        if token
-    }
+    return {token for token in (normalize_topic_token(raw) for raw in re.findall(r"[A-Za-z0-9']+", text)) if token}
 
 
 def should_recheck_intent_on_follow_up(messages: list[Any]) -> bool:

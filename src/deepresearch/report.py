@@ -31,9 +31,7 @@ from .state import (
 _logger = logging.getLogger(__name__)
 
 _SOURCE_URL_PATTERN = re.compile(r"https?://[^\s<>\]\"')]+")
-_SOURCE_SECTION_HEADER_PATTERN = re.compile(
-    r"(?im)^\s{0,3}(?:#{1,6}\s*)?(?:sources?|references?)\s*:?\s*$"
-)
+_SOURCE_SECTION_HEADER_PATTERN = re.compile(r"(?im)^\s{0,3}(?:#{1,6}\s*)?(?:sources?|references?)\s*:?\s*$")
 _NO_SOURCE_URLS_SENTINEL_PATTERN = re.compile(
     r"(?im)^\s*[-*]?\s*No source URLs were available in collected notes\.?\s*$"
 )

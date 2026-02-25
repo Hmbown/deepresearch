@@ -410,10 +410,7 @@ class ProgressDisplay:
             depth=1,
         )
         self._emit(
-            (
-                f"Total so far: {self._evidence_record_count} sources "
-                f"from {len(self._evidence_domains)} domains"
-            ),
+            (f"Total so far: {self._evidence_record_count} sources from {len(self._evidence_domains)} domains"),
             depth=2,
         )
 
@@ -425,7 +422,9 @@ class ProgressDisplay:
         return max(0, parsed)
 
     def _sync_runtime_evidence_totals(self, progress: Mapping[str, Any]) -> None:
-        evidence_count = self._coerce_non_negative_int(progress.get("evidence_record_count"), self._evidence_record_count)
+        evidence_count = self._coerce_non_negative_int(
+            progress.get("evidence_record_count"), self._evidence_record_count
+        )
         source_domains = progress.get("source_domains")
         if isinstance(source_domains, list):
             normalized_domains = {str(domain).strip().lower() for domain in source_domains if str(domain).strip()}
@@ -570,7 +569,9 @@ class ProgressDisplay:
         if checkpoint_ns and checkpoint_ns.count("|") == 1:
             self._start_research_section(checkpoint_ns, metadata, data)
 
-    def _handle_chain_end(self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None) -> None:
+    def _handle_chain_end(
+        self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None
+    ) -> None:
         if not isinstance(data, Mapping):
             return
 
@@ -580,9 +581,7 @@ class ProgressDisplay:
             if isinstance(output, Mapping):
                 self._finish_research_section(checkpoint_ns, output)
 
-    def _handle_chain_error(
-        self, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None
-    ) -> None:
+    def _handle_chain_error(self, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None) -> None:
         checkpoint_ns = str((metadata or {}).get("checkpoint_ns", "")) if isinstance(metadata, Mapping) else ""
         if checkpoint_ns not in self._active_research:
             return
@@ -671,7 +670,9 @@ class ProgressDisplay:
             if text:
                 self._emit(f"[model] {_truncate(text, 120)}", depth=depth)
 
-    def _handle_custom_event(self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None) -> None:
+    def _handle_custom_event(
+        self, event_name: str, metadata: Mapping[str, Any] | None, data: Mapping[str, Any] | None
+    ) -> None:
         progress = _extract_supervisor_progress_payload(event_name, data)
         if not progress:
             return

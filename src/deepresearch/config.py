@@ -217,9 +217,9 @@ def _resolve_openai_web_search_model() -> str:
 
 
 def _resolve_openai_web_search_context_size() -> str:
-    raw_value = str(
-        os.environ.get("OPENAI_WEB_SEARCH_CONTEXT_SIZE", DEFAULT_OPENAI_WEB_SEARCH_CONTEXT_SIZE)
-    ).strip().lower()
+    raw_value = (
+        str(os.environ.get("OPENAI_WEB_SEARCH_CONTEXT_SIZE", DEFAULT_OPENAI_WEB_SEARCH_CONTEXT_SIZE)).strip().lower()
+    )
     if raw_value in SUPPORTED_OPENAI_WEB_SEARCH_CONTEXT_SIZES:
         return raw_value
     return DEFAULT_OPENAI_WEB_SEARCH_CONTEXT_SIZE

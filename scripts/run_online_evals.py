@@ -109,15 +109,17 @@ def main() -> int:
                     pass
 
         scored += 1
-        results_table.append({
-            "run_id": run_id[:12],
-            "answer": answer_score,
-            "process": process_score,
-            "composite": composite_score,
-        })
+        results_table.append(
+            {
+                "run_id": run_id[:12],
+                "answer": answer_score,
+                "process": process_score,
+                "composite": composite_score,
+            }
+        )
         print(f"answer={answer_score} process={process_score} composite={composite_score}")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Scored: {scored} | Skipped (already scored): {skipped} | Total: {len(runs)}")
 
     if results_table:

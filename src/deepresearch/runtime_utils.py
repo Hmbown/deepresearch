@@ -34,8 +34,7 @@ def log_runtime_event(logger: logging.Logger, event: str, **fields: Any) -> None
         return
 
     encoded_fields = " ".join(
-        f"{name}={json.dumps(value, ensure_ascii=True, sort_keys=True)}"
-        for name, value in sorted(fields.items())
+        f"{name}={json.dumps(value, ensure_ascii=True, sort_keys=True)}" for name, value in sorted(fields.items())
     )
     if encoded_fields:
         logger.info("event=%s %s", event, encoded_fields)

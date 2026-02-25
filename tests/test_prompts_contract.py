@@ -42,7 +42,7 @@ def test_supervisor_prompt_is_native_multi_agent_contract():
     for token in required_tokens:
         assert token in prompts.SUPERVISOR_PROMPT
 
-    forbidden_tokens = ["write_todos", "task(", "subagent_type=\"research-agent\""]
+    forbidden_tokens = ["write_todos", "task(", 'subagent_type="research-agent"']
     for token in forbidden_tokens:
         assert token not in prompts.SUPERVISOR_PROMPT
 

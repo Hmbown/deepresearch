@@ -221,10 +221,7 @@ def test_runtime_preflight_allows_process_env_without_dotenv(monkeypatch, tmp_pa
 def test_update_project_dotenv_upserts_managed_keys_and_preserves_existing_entries(monkeypatch, tmp_path):
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text(
-        "# existing comment\n"
-        "UNRELATED_KEY=keep-me\n"
-        "OPENAI_API_KEY=old-openai\n"
-        "export SEARCH_PROVIDER=none\n",
+        "# existing comment\nUNRELATED_KEY=keep-me\nOPENAI_API_KEY=old-openai\nexport SEARCH_PROVIDER=none\n",
         encoding="utf-8",
     )
 

@@ -19,14 +19,7 @@ def _is_non_public_ip(hostname: str) -> bool:
     except ValueError:
         return False
 
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
 
 
 def _validate_fetch_url_target(url: str) -> tuple[bool, str]:
@@ -205,10 +198,7 @@ def _count_raw_result_items(raw_output: Any) -> int:
 
 def _search_failure_message(query: str, attempts: int) -> str:
     attempt_label = "attempt" if attempts == 1 else "attempts"
-    return (
-        f"Search failed for '{query}': provider request failed after "
-        f"{attempts} {attempt_label}."
-    )
+    return f"Search failed for '{query}': provider request failed after {attempts} {attempt_label}."
 
 
 @tool(parse_docstring=True)

@@ -16,9 +16,7 @@ def test_extract_research_from_messages_emits_typed_evidence_records():
     messages = [
         ToolMessage(
             content=(
-                "[Source 1] Example A\n"
-                "URL: https://example.com/source-a\n"
-                "Summary: Baseline metric improved 12% [1]."
+                "[Source 1] Example A\nURL: https://example.com/source-a\nSummary: Baseline metric improved 12% [1]."
             ),
             name="search_web",
             tool_call_id="search-1",

@@ -27,7 +27,6 @@ _URL_PATTERN = re.compile(r"https?://[^\s<>\]\"')]+")
 _SEARCH_URL_LINE_PATTERN = re.compile(r"(?im)^\s*URL:\s*(\S+)")
 
 
-
 def _resolve_create_deep_agent():
     if create_deep_agent is not None:
         return create_deep_agent
@@ -210,12 +209,7 @@ def extract_research_from_messages(result: dict) -> tuple[str | None, list[str],
     model_cited_evidence = _extract_evidence_records(raw_text, source_type="model_cited")
     evidence_ledger = list(fetched_evidence)
 
-    seen_urls = {
-        url
-        for record in fetched_evidence
-        for url in record.source_urls
-        if _is_http_url(url)
-    }
+    seen_urls = {url for record in fetched_evidence for url in record.source_urls if _is_http_url(url)}
     for record in model_cited_evidence:
         urls = [url for url in record.source_urls if _is_http_url(url)]
         if not urls:

@@ -132,7 +132,7 @@ def test_progress_display_research_summary_uses_extracted_evidence():
                                 "Sources:\n"
                                 "[1] https://navy.example/briefing"
                             ),
-                        )
+                        ),
                     ]
                 }
             },
@@ -158,11 +158,7 @@ def test_progress_display_research_summary_surfaces_model_cited_urls_separately(
                     "messages": [
                         SimpleNamespace(
                             type="ai",
-                            content=(
-                                "Autonomy note [1].\n\n"
-                                "Sources:\n"
-                                "[1] https://navy.example/briefing"
-                            ),
+                            content=("Autonomy note [1].\n\nSources:\n[1] https://navy.example/briefing"),
                         )
                     ]
                 }

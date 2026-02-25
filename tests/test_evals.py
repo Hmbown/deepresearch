@@ -86,21 +86,25 @@ def test_get_final_report_from_final_report_field():
 
 
 def test_get_final_report_from_messages_fallback():
-    run = _make_run(outputs={
-        "messages": [
-            {"type": "human", "content": "query"},
-            {"type": "ai", "content": "The AI response."},
-        ]
-    })
+    run = _make_run(
+        outputs={
+            "messages": [
+                {"type": "human", "content": "query"},
+                {"type": "ai", "content": "The AI response."},
+            ]
+        }
+    )
     assert _get_final_report(run) == "The AI response."
 
 
 def test_get_final_report_from_messages_with_blocks():
-    run = _make_run(outputs={
-        "messages": [
-            {"type": "ai", "content": [{"type": "text", "text": "block content"}]},
-        ]
-    })
+    run = _make_run(
+        outputs={
+            "messages": [
+                {"type": "ai", "content": [{"type": "text", "text": "block content"}]},
+            ]
+        }
+    )
     assert _get_final_report(run) == "block content"
 
 
@@ -132,13 +136,21 @@ def test_build_process_summary_counts_tools():
     child_runs = [
         SimpleNamespace(name="ConductResearch", inputs={}, outputs={"output": "findings"}),
         SimpleNamespace(name="ConductResearch", inputs={}, outputs={"output": "more findings"}),
-        SimpleNamespace(name="search_web", inputs={}, outputs=[
-            {"url": "https://example.com/page1"},
-            {"url": "https://arxiv.org/paper"},
-        ]),
-        SimpleNamespace(name="search_web", inputs={}, outputs=[
-            {"url": "https://example.com/page2"},
-        ]),
+        SimpleNamespace(
+            name="search_web",
+            inputs={},
+            outputs=[
+                {"url": "https://example.com/page1"},
+                {"url": "https://arxiv.org/paper"},
+            ],
+        ),
+        SimpleNamespace(
+            name="search_web",
+            inputs={},
+            outputs=[
+                {"url": "https://example.com/page2"},
+            ],
+        ),
         SimpleNamespace(name="fetch_url", inputs={"url": "https://nature.com/article"}, outputs={}),
         SimpleNamespace(name="think_tool", inputs={}, outputs={}),
         SimpleNamespace(name="think_tool", inputs={}, outputs={}),
@@ -272,9 +284,10 @@ def test_callback_handler_skips_non_root_runs():
 
 def test_callback_handler_fires_for_root_runs():
     handler = OnlineEvalCallbackHandler(client=MagicMock())
-    with patch.object(handler, "_run_eval_sync") as mock_eval, patch(
-        "deepresearch.evals.callback.threading.Thread"
-    ) as mock_thread:
+    with (
+        patch.object(handler, "_run_eval_sync") as mock_eval,
+        patch("deepresearch.evals.callback.threading.Thread") as mock_thread,
+    ):
 
         class _InlineThread:
             def __init__(self, *, target, args, daemon):

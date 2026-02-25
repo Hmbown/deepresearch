@@ -36,11 +36,7 @@ def _langsmith_enabled() -> bool:
 
 
 def _langsmith_project() -> str:
-    return (
-        os.environ.get("LANGCHAIN_PROJECT")
-        or os.environ.get("LANGSMITH_PROJECT")
-        or "deepresearch-local"
-    )
+    return os.environ.get("LANGCHAIN_PROJECT") or os.environ.get("LANGSMITH_PROJECT") or "deepresearch-local"
 
 
 def _count_conduct_research_messages(messages: list[Any]) -> int:
@@ -105,11 +101,9 @@ async def _run_validation() -> int:
         prior_messages=prior_messages,
     )
     turn_2_decision = str(turn_2_result.get("intake_decision") or "")
-    conduct_research_count = _count_conduct_research_messages(
-        list(turn_2_result.get("supervisor_messages", []))
-    )
+    conduct_research_count = _count_conduct_research_messages(list(turn_2_result.get("supervisor_messages", [])))
 
-    final_report = (str(turn_2_result.get("final_report") or "").strip() or cli._final_assistant_text(turn_2_result))
+    final_report = str(turn_2_result.get("final_report") or "").strip() or cli._final_assistant_text(turn_2_result)
     final_report_preview = final_report[:300]
 
     print("=== Long Multi-Agent Validation ===")
@@ -127,10 +121,7 @@ async def _run_validation() -> int:
     if turn_2_decision != "proceed":
         validation_errors.append(f"Expected turn2 intake_decision=proceed, got `{turn_2_decision}`.")
     if conduct_research_count < 3:
-        validation_errors.append(
-            "Expected >=3 executed ConductResearch messages, "
-            f"got {conduct_research_count}."
-        )
+        validation_errors.append(f"Expected >=3 executed ConductResearch messages, got {conduct_research_count}.")
 
     if _langsmith_enabled():
         langsmith_ok, langsmith_message = _verify_langsmith_trace(max_wait_seconds=30)

@@ -114,9 +114,7 @@ def test_scope_intake_offers_plan_checkpoint_for_broad_request_with_scope(monkey
             {
                 "messages": [
                     HumanMessage(
-                        content=(
-                            "Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?"
-                        )
+                        content=("Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?")
                     )
                 ],
                 "awaiting_clarification": False,
@@ -129,7 +127,7 @@ def test_scope_intake_offers_plan_checkpoint_for_broad_request_with_scope(monkey
     assert command.goto == "__end__"
     assert command.update["intake_decision"] == "clarify"
     assert command.update["awaiting_clarification"] is True
-    assert "reply \"start\"" in command.update["messages"][0].content.lower()
+    assert 'reply "start"' in command.update["messages"][0].content.lower()
     schemas_called = [schema for schema, _ in llm.structured_calls]
     assert "ClarifyWithUser" in schemas_called
     assert "ResearchBrief" in schemas_called
@@ -154,9 +152,7 @@ def test_scope_intake_proceeds_after_plan_checkpoint_confirmation(monkeypatch):
             {
                 "messages": [
                     HumanMessage(
-                        content=(
-                            "Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?"
-                        )
+                        content=("Which U.S. stocks are most at risk of bankruptcy from February 2026 onward?")
                     ),
                     AIMessage(content='If this plan looks right, reply "start".'),
                     HumanMessage(content="start"),
@@ -247,7 +243,7 @@ def test_scope_intake_does_not_start_research_when_plan_is_not_acknowledged(monk
     assert command.goto == "__end__"
     assert command.update["intake_decision"] == "clarify"
     assert command.update["awaiting_clarification"] is True
-    assert "reply \"start\"" in command.update["messages"][0].content.lower()
+    assert 'reply "start"' in command.update["messages"][0].content.lower()
     schemas_called = [schema for schema, _ in llm.structured_calls]
     assert "ClarifyWithUser" in schemas_called
     assert "ResearchBrief" in schemas_called
@@ -521,9 +517,7 @@ def test_app_multi_turn_clarify_then_proceed_uses_message_history(monkeypatch):
     assert "market segment" in first_result["messages"][-1].content.lower()
     assert supervisor_graph.await_count == 0
 
-    follow_up_messages = list(first_result["messages"]) + [
-        HumanMessage(content="Focus on high-end datacenter GPUs.")
-    ]
+    follow_up_messages = list(first_result["messages"]) + [HumanMessage(content="Focus on high-end datacenter GPUs.")]
     second_result = asyncio.run(
         graph.app.ainvoke(
             {"messages": follow_up_messages},
@@ -542,9 +536,7 @@ def test_scope_intake_initializes_supervisor_state(monkeypatch):
     graph = _load_graph_module()
     intake = importlib.import_module("deepresearch.intake")
     llm = FakeLLM(
-        structured_responses={
-            "ResearchBrief": [SimpleNamespace(research_brief="Detailed brief for supervision.")]
-        }
+        structured_responses={"ResearchBrief": [SimpleNamespace(research_brief="Detailed brief for supervision.")]}
     )
     monkeypatch.setattr(intake, "get_llm", lambda role: llm)
 

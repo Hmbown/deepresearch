@@ -274,11 +274,7 @@ def _clarification_command(
 def _plan_message(plan: ResearchPlan | None, research_brief: str) -> str:
     if plan is not None:
         return _format_plan_message(plan)
-    return (
-        f"Before I start research, here is the scope:\n\n"
-        f"{research_brief}\n\n"
-        f"{FALLBACK_PLAN_CONFIRMATION_FOOTER}"
-    )
+    return f"Before I start research, here is the scope:\n\n{research_brief}\n\n{FALLBACK_PLAN_CONFIRMATION_FOOTER}"
 
 
 async def _handle_clarification_or_plan(

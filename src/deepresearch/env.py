@@ -142,11 +142,7 @@ def _langsmith_api_key() -> str | None:
 
 
 def _langsmith_project_name(default: str) -> str:
-    return (
-        os.environ.get("LANGCHAIN_PROJECT")
-        or os.environ.get("LANGSMITH_PROJECT")
-        or default
-    )
+    return os.environ.get("LANGCHAIN_PROJECT") or os.environ.get("LANGSMITH_PROJECT") or default
 
 
 def _dependency_available(module_name: str) -> bool:
@@ -231,8 +227,7 @@ def ensure_runtime_env_ready() -> None:
         return
     joined = ", ".join(missing)
     raise RuntimeError(
-        "Missing required environment variable(s): "
-        f"{joined}. Set them in your shell or add them to `{dotenv_path}`."
+        f"Missing required environment variable(s): {joined}. Set them in your shell or add them to `{dotenv_path}`."
     )
 
 

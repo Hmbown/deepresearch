@@ -22,9 +22,7 @@ class FakeStructuredRunner:
 
 class FakeLLM:
     def __init__(self, *, structured_responses=None, freeform_responses=None):
-        self.structured_responses = {
-            name: list(values) for name, values in (structured_responses or {}).items()
-        }
+        self.structured_responses = {name: list(values) for name, values in (structured_responses or {}).items()}
         self.freeform_responses = list(freeform_responses or [])
         self.structured_calls = []
         self.freeform_calls = []
