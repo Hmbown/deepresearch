@@ -16,7 +16,7 @@ cp .env.example .env   # add your OPENAI_API_KEY here
 deepresearch "your research question"
 ```
 
-You'll need **Python 3.11+** and an **OpenAI API key**. A **Tavily API key** is optional but recommended for web search (Exa works too).
+You'll need **Python 3.11+** and an **OpenAI API key**. By default, search uses OpenAI's built-in `web_search` tool in the Responses API. Tavily/Exa are optional alternatives.
 
 ## How it works
 
@@ -60,6 +60,14 @@ If you don't have search API credits or just want to test the pipeline:
 
 ```bash
 SEARCH_PROVIDER=none deepresearch "key differences between Python 3.11 and 3.12"
+```
+
+### Use Exa or Tavily instead of OpenAI web search
+
+```bash
+SEARCH_PROVIDER=exa deepresearch "your research question"
+# or
+SEARCH_PROVIDER=tavily deepresearch "your research question"
 ```
 
 ### LangGraph Studio

@@ -834,14 +834,14 @@ def _prompt_yes_no(prompt: str, *, default: bool = False) -> bool:
 
 
 def _prompt_search_provider() -> str:
-    supported = {"exa", "tavily", "none"}
+    supported = {"openai", "exa", "tavily", "none"}
     while True:
-        raw = input("Search provider [exa/tavily/none] (default: exa): ").strip().lower()
+        raw = input("Search provider [openai/exa/tavily/none] (default: openai): ").strip().lower()
         if not raw:
-            return "exa"
+            return "openai"
         if raw in supported:
             return raw
-        print("Choose one of: exa, tavily, none.")
+        print("Choose one of: openai, exa, tavily, none.")
 
 
 def _print_setup_header() -> None:
@@ -892,7 +892,7 @@ def _print_setup_summary(
     langsmith_enabled: bool,
     langsmith_project: str | None,
 ) -> None:
-    search_provider = updates.get("SEARCH_PROVIDER", "exa")
+    search_provider = updates.get("SEARCH_PROVIDER", "openai")
     print(f"\nWrote setup to `{dotenv_path}`")
     print("\nConfigured services")
     print("-" * 40)

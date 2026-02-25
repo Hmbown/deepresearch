@@ -169,9 +169,9 @@ def test_runtime_env_overrides_are_respected(monkeypatch):
     assert config.get_max_researcher_iterations() == 7
 
 
-def test_get_search_provider_defaults_to_tavily(monkeypatch):
+def test_get_search_provider_defaults_to_openai(monkeypatch):
     monkeypatch.delenv("SEARCH_PROVIDER", raising=False)
-    assert config.get_search_provider() == "tavily"
+    assert config.get_search_provider() == "openai"
 
 
 def test_get_search_provider_rejects_invalid_value(monkeypatch):
@@ -191,6 +191,21 @@ def test_validate_search_provider_configuration_fails_for_missing_tavily_key(mon
     monkeypatch.setenv("SEARCH_PROVIDER", "tavily")
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     with pytest.raises(config.SearchProviderConfigError, match="TAVILY_API_KEY"):
+        config.validate_search_provider_configuration()
+
+
+def test_validate_search_provider_configuration_fails_for_missing_openai_key(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(config.SearchProviderConfigError, match="OPENAI_API_KEY"):
+        config.validate_search_provider_configuration()
+
+
+def test_validate_search_provider_configuration_fails_for_missing_openai_dependency(monkeypatch):
+    monkeypatch.setenv("SEARCH_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setitem(sys.modules, "openai", None)
+    with pytest.raises(config.SearchProviderConfigError, match="dependency 'openai'"):
         config.validate_search_provider_configuration()
 
 
@@ -240,6 +255,16 @@ def test_get_search_tool_uses_tavily_when_provider_is_configured(monkeypatch):
 
     tool = config.get_search_tool()
     assert tool.provider == "tavily"
+
+
+def test_get_search_tool_uses_openai_when_provider_is_configured(monkeypatch):
+    fake_tool = object()
+    monkeypatch.setenv("SEARCH_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
+    monkeypatch.setattr(config, "_build_openai_responses_web_search_tool", lambda: fake_tool)
+
+    tool = config.get_search_tool()
+    assert tool is fake_tool
 
 
 def test_get_search_tool_returns_none_when_provider_is_none(monkeypatch):
@@ -542,3 +567,27 @@ def test_setup_wizard_langsmith_path_defaults_project_and_can_open_browser(monke
     assert "LANGCHAIN_TRACING_V2=true" in contents
     assert "LANGCHAIN_API_KEY=langsmith-secret" in contents
     assert "LANGCHAIN_PROJECT=deepresearch-local" in contents
+
+
+def test_setup_wizard_defaults_to_openai_search_provider(monkeypatch, tmp_path):
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(env, "_PROJECT_DOTENV", dotenv_path)
+    monkeypatch.setattr(env, "_ENV_BOOTSTRAPPED", False)
+    monkeypatch.setattr(env, "_BOOTSTRAPPED_DOTENV", None)
+    prompts = iter(["", "n"])
+    secrets = iter(["openai-default-provider-key"])
+    preflight_calls: list[str | None] = []
+
+    monkeypatch.setattr("builtins.input", lambda _="": next(prompts))
+    monkeypatch.setattr(cli, "getpass", lambda _="": next(secrets))
+    monkeypatch.setattr(cli, "print_preflight", lambda project_name=None: preflight_calls.append(project_name) or 0)
+
+    result = cli.run_setup_wizard()
+    contents = dotenv_path.read_text(encoding="utf-8")
+
+    assert result == 0
+    assert preflight_calls == [None]
+    assert "OPENAI_API_KEY=openai-default-provider-key" in contents
+    assert "SEARCH_PROVIDER=openai" in contents
